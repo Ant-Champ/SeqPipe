@@ -25,19 +25,11 @@ def ref_length(sample):
     return _genbank_length(ref_gb_path(sample))
 
 
-def _resolve_fastq(value):
-    """A sheet entry is either a path (absolute, or relative to fastq_dir)
-    or, for ONT, a barcode -> {fastq_dir}{fastq_base_name}{barcode}.fastq.gz"""
-    if re.search(r"\.f(ast)?q(\.gz)?$", value):
-        return value if os.path.isabs(value) else FASTQ_DIR + value
-    return f"{FASTQ_DIR}{FASTQ_BASE_NAME}{value}.fastq.gz"
-
-
 def raw_reads(sample):
-    """Raw input FASTQ(s) of a sample: [reads] for ONT, [R1, R2] for short reads."""
-    r = [_resolve_fastq(samples.at[sample, "reads1"])]
+    """Raw input FASTQ(s) of a sample, as written in the sheet: [reads] for ONT, [R1, R2] for short reads."""
+    r = [samples.at[sample, "reads1"]]
     if not is_ont(sample):
-        r.append(_resolve_fastq(samples.at[sample, "reads2"]))
+        r.append(samples.at[sample, "reads2"])
     return r
 
 
@@ -62,10 +54,7 @@ def minimap2_preset(wildcards):
 
 def ref_gb_path(sample):
     """Resolve the GenBank reference for a sample (name with or without .gb)."""
-    ref = samples.at[sample, "reference"]
-    if not re.search(r"\.(gb|gbk|genbank)$", ref):
-        ref += ".gb"
-    return ref if os.path.isabs(ref) else REF_DIR + ref
+    return _ref_path(samples.at[sample, "reference"])
 
 
 def sample_ref_gb(wildcards):

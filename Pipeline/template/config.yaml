@@ -8,16 +8,9 @@
 out_dir      : "/path/to/run/results/"
 sample_sheet : "/path/to/run/sample_sheet.tsv"
 ref_dir      : "/path/to/run/genbank_files/"    # GenBank references (.gb), see `reference` column
-fastq_dir    : "/path/to/run/fastq/"            # used for ONT barcodes and relative FASTQ paths
-
-# ONT barcodes in the sheet's reads1 column become
-#   {fastq_dir}{fastq_base_name}{barcode}.fastq.gz
-# Use "" if your files are just {barcode}.fastq.gz
-fastq_base_name : ""
-
-# Reference used for samples whose `reference` column is empty
-# (name of a .gb file in ref_dir, with or without .gb). "" = none.
-default_reference : ""
+# The FASTQ files and the reference of each sample are given in the sample
+# sheet (full paths in reads1 / reads2, reference name in `reference`).
+# Nothing has a default: an empty or wrong entry stops the run before it starts.
 
 # --- analysis toggles (apply to the whole run, not per sample) --------
 # Alignment to each sample's reference, read statistics and summary.tsv

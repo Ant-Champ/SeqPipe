@@ -4,9 +4,6 @@
 out_dir      : "results/"
 sample_sheet : "sample_sheet.tsv"
 ref_dir      : "data/ref/"
-fastq_dir    : "data/fastq/"
-fastq_base_name   : ""
-default_reference : "testref"
 
 run_read_filtering    : true
 run_variant_calling   : true

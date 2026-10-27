@@ -198,34 +198,48 @@ cp ~/Pipeline/template/config.yaml ~/Pipeline/template/sample_sheet.tsv .
 
 ### 3.1 The sample sheet
 
-The sheet is **tab-separated**, with a header line and one row per sample:
+The sheet is **tab-separated**, with a header line and one row per sample. All five columns
+must be present:
 
-| column | required | meaning |
-|---|---|---|
-| `sample_name` | yes | becomes file and folder names. No spaces or slashes |
-| `platform` | yes | `ont`, `element` or `illumina` |
-| `reads1` | yes | **ONT**: a barcode (→ `{fastq_dir}{fastq_base_name}{barcode}.fastq.gz`) or a FASTQ path. **SR**: the R1 FASTQ |
-| `reads2` | SR only | the R2 FASTQ (leave empty for ONT) |
-| `reference` | see below | GenBank file name in `ref_dir`, with or without `.gb` (or an absolute path). Empty → `default_reference` from the config |
-
-FASTQ paths can be absolute or relative to `fastq_dir`.
+| column | meaning |
+|---|---|
+| `sample_name` | becomes file and folder names. No spaces or slashes |
+| `platform` | `ont`, `element` or `illumina` |
+| `reads1` | **full path** of the FASTQ: the ONT reads, or R1 for short reads (`.fastq`/`.fq`, optionally `.gz`) |
+| `reads2` | **full path** of R2 for short reads. **Leave empty for ONT** |
+| `reference` | GenBank file name in `ref_dir`, with or without `.gb`, or a full path to a `.gb` file |
 
 Example (`template/sample_sheet.tsv`):
 
 ```
 sample_name	platform	reads1	reads2	reference
-KEIO_ylcJ_ont	ont	barcode05		ecoli_BW25113
-KEIO_ylcI_ont	ont	/full/path/to/barcode06.fastq.gz		ecoli_BW25113
+KEIO_ylcJ_ont	ont	/full/path/to/fastq_pass/barcode05.fastq.gz		ecoli_BW25113
+KEIO_ylcI_ont	ont	/full/path/to/fastq_pass/barcode06.fastq.gz		ecoli_BW25113
 ylcJ	element	/full/path/to/ylcJ_R1.fastq.gz	/full/path/to/ylcJ_R2.fastq.gz	ecoli_BW25113
-acnB_acnA	element	/full/path/to/acnB_acnA_R1.fastq.gz	/full/path/to/acnB_acnA_R2.fastq.gz	
+acnB_acnA	element	/full/path/to/acnB_acnA_R1.fastq.gz	/full/path/to/acnB_acnA_R2.fastq.gz	ecoli_BW25113
 ```
 
-The last row has no reference, so it uses `default_reference`.
+**Nothing has a default.** Before anything runs, even a dry run (`-n`), the pipeline checks
+every row and **stops with the full list of problems**. It stops on:
+- an empty or unknown `platform`;
+- an empty `reads1`, or an empty `reads2` for a short-read sample;
+- a path that is not a FASTQ file, or a FASTQ file that doesn't exist;
+- a `reads2` value on an ONT sample;
+- an empty `reference`, or a reference file not found;
+- a duplicated `sample_name`.
+
+Use full paths (`/home/...`, `/net/...`). A relative path is read from the run folder (the
+folder that contains `config.yaml`).
+
+To fill the ONT column quickly, list the files with full paths:
+```bash
+ls -1 /full/path/to/fastq_pass/*.fastq.gz
+```
 
 - Many editors replace tabs with spaces. Check with `cat -A sample_sheet.tsv`: tabs show as `^I`.
 - Lines starting with `#` are ignored.
-- **Old ONT sheets still work.** A sheet with the columns `sample_name barcode ref_fasta` is
-  read as ONT samples.
+- Old ONT sheets with `barcode` / `ref_fasta` columns are no longer accepted. The pipeline stops
+  and says so.
 
 ### 3.2 The references
 
@@ -243,9 +257,6 @@ Edit `config.yaml`. The first part is all you normally touch:
 out_dir      : "/home/<you>/runs/WGS_KEIO_2026_11/results/"
 sample_sheet : "/home/<you>/runs/WGS_KEIO_2026_11/sample_sheet.tsv"
 ref_dir      : "/home/<you>/runs/WGS_KEIO_2026_11/genbank_files/"
-fastq_dir    : "/net/.../fastq_pass/"       # for ONT barcodes / relative FASTQ paths
-fastq_base_name   : ""                       # e.g. "FAX12345_pass_" if files are FAX12345_pass_barcode05.fastq.gz
-default_reference : "ecoli_BW25113"          # used where the sheet's reference column is empty
 
 run_read_filtering    : true
 run_variant_calling   : true
@@ -509,8 +520,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | run stuck or failing on "Creating conda environment" on a compute node | the environments were not built: run `~/Pipeline/run.sh setup` on a login node ([2.4](#24-build-the-tool-environments-login-node-needs-internet)) |
 | `ERROR: not inside a SLURM allocation` | start `salloc` first (inside tmux), or add `-n` for a dry run |
 | `sample_sheet is missing required column(s)` | the sheet is not tab-separated, or the header is misspelled |
-| `MissingInputException … fastq.gz` | wrong FASTQ path / barcode / `fastq_base_name`. Check one with `ls` |
-| `no reference for [...]` | fill the `reference` column or set `default_reference` |
+| `N problem(s) in sample_sheet …` | the list below it says which sample and column. Fix them all, then re-run |
+| `config key(s) fastq_dir, … are no longer used` | an old config: delete those lines and put full FASTQ paths and the reference in the sheet |
+| `old ONT sample sheet (barcode / ref_fasta columns)` | rewrite the sheet with the five columns ([3.1](#31-the-sample-sheet)) |
 | `Directory cannot be locked` | a previous run crashed: `run.sh <config> --unlock`, then run again |
 | a step failed | read `<out_dir>/<sample>/logs/<step>.log`. Fix, then run the same command again |
 | allocation time ran out | new `salloc`, same command. Unfinished jobs are redone (`--rerun-incomplete` is on) |

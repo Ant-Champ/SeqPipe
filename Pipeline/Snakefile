@@ -40,12 +40,17 @@ PIPELINE_DIR = workflow.basedir
 # ----------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------
-OUT_DIR   = os.path.join(config["out_dir"], "")        # trailing slash guaranteed
-FASTQ_DIR = os.path.join(config.get("fastq_dir", ""), "") if config.get("fastq_dir") else ""
-REF_DIR   = os.path.join(config["ref_dir"], "")
+OUT_DIR = os.path.join(config["out_dir"], "")        # trailing slash guaranteed
+REF_DIR = os.path.join(config["ref_dir"], "")
 
-FASTQ_BASE_NAME   = config.get("fastq_base_name", "")
-DEFAULT_REFERENCE = config.get("default_reference", "")
+# Removed keys: every sample now gives its own FASTQ path(s) and reference in
+# the sheet. Stop rather than silently ignore them.
+_obsolete = [k for k in ("fastq_dir", "fastq_base_name", "default_reference") if k in config]
+if _obsolete:
+    raise WorkflowError(
+        f"config key(s) {', '.join(_obsolete)} are no longer used: remove them from config.yaml and "
+        "give each sample its full FASTQ path(s) (reads1/reads2) and its reference in the sample sheet."
+    )
 
 # Scripts live in <pipeline>/scripts unless script_dir points elsewhere;
 # per-script filenames can be overridden in config['script'].
@@ -123,39 +128,73 @@ if RUN_CASSETTES:
 # ----------------------------------------------------------------------
 # Samples
 # ----------------------------------------------------------------------
-# Columns: sample_name, platform, reads1, reads2, reference
-# Old ONT sheets (sample_name, barcode, ref_fasta) are still accepted:
-# barcode -> reads1, ref_fasta -> reference, platform defaults to ont.
+# Columns (all required, tab-separated):
+#   sample_name  platform  reads1  reads2  reference
+# reads1/reads2 = full FASTQ paths (reads2 empty for ONT); relative paths are
+# relative to the run folder (the folder of config.yaml). reference = GenBank
+# file in ref_dir (with or without .gb) or a full path. Every problem in the
+# sheet is collected and reported at once, before anything runs.
 samples = pd.read_table(config["sample_sheet"], dtype=str, comment="#").fillna("")
 samples.columns = [c.strip() for c in samples.columns]
-samples = samples.rename(columns={"barcode": "reads1", "ref_fasta": "reference"})
-for _col, _default in (("platform", "ont"), ("reads2", ""), ("reference", "")):
-    if _col not in samples.columns:
-        samples[_col] = _default
-samples = samples.apply(lambda col: col.str.strip())
 
-_missing = {"sample_name", "reads1"} - set(samples.columns)
+if {"barcode", "ref_fasta"} & set(samples.columns):
+    raise WorkflowError(
+        "old ONT sample sheet (barcode / ref_fasta columns) is no longer accepted: use the columns "
+        "sample_name, platform, reads1, reads2, reference with the full FASTQ path in reads1 "
+        "(see template/sample_sheet.tsv)."
+    )
+_missing = {"sample_name", "platform", "reads1", "reads2", "reference"} - set(samples.columns)
 if _missing:
     raise WorkflowError(
         f"sample_sheet is missing required column(s): {', '.join(sorted(_missing))} "
-        "-- is it tab-separated?"
+        "-- is it tab-separated? (columns: sample_name platform reads1 reads2 reference)"
+    )
+samples = samples.apply(lambda col: col.str.strip())
+samples["platform"] = samples["platform"].str.lower()
+
+if samples["sample_name"].duplicated().any():
+    raise WorkflowError(
+        f"sample_sheet has duplicated sample_name values: "
+        f"{sorted(set(samples.loc[samples['sample_name'].duplicated(), 'sample_name']))}"
     )
 
-samples["platform"] = samples["platform"].str.lower().replace("", "ont")
-_bad = sorted(set(samples["platform"]) - {"ont", "element", "illumina"})
-if _bad:
-    raise WorkflowError(f"unknown platform(s) in sample_sheet: {_bad} (use ont | element | illumina)")
-if samples["sample_name"].duplicated().any():
-    raise WorkflowError("sample_sheet has duplicated sample_name values")
+_FASTQ_RE = re.compile(r"\.f(ast)?q(\.gz)?$")
 
-samples["reference"] = samples["reference"].replace("", DEFAULT_REFERENCE)
-_noref = list(samples.loc[samples["reference"] == "", "sample_name"])
-if _noref:
-    raise WorkflowError(f"no reference for {_noref}: fill the reference column or set default_reference")
 
-_sr_no_r2 = list(samples.loc[(samples["platform"] != "ont") & (samples["reads2"] == ""), "sample_name"])
-if _sr_no_r2:
-    raise WorkflowError(f"short-read sample(s) {_sr_no_r2} need both reads1 (R1) and reads2 (R2)")
+def _ref_path(ref):
+    if not re.search(r"\.(gb|gbk|genbank)$", ref):
+        ref += ".gb"
+    return ref if os.path.isabs(ref) else REF_DIR + ref
+
+
+_errors = []
+for _i, _row in samples.iterrows():
+    _s = _row["sample_name"] or f"(row {_i + 2})"
+    if not _row["sample_name"]:
+        _errors.append(f"row {_i + 2}: empty sample_name")
+    if _row["platform"] not in ("ont", "element", "illumina"):
+        _errors.append(f"{_s}: platform '{_row['platform']}' (use ont | element | illumina)")
+    _reads = [("reads1", _row["reads1"])]
+    if _row["platform"] == "ont":
+        if _row["reads2"]:
+            _errors.append(f"{_s}: ONT sample with a reads2 value (leave reads2 empty for ONT)")
+    elif _row["platform"] in ("element", "illumina"):
+        _reads.append(("reads2", _row["reads2"]))
+    for _col, _path in _reads:
+        if not _path:
+            _errors.append(f"{_s}: {_col} is empty")
+        elif not _FASTQ_RE.search(_path):
+            _errors.append(f"{_s}: {_col} '{_path}' is not a FASTQ path (.fastq/.fq, optionally .gz)")
+        elif not os.path.isfile(_path):
+            _errors.append(f"{_s}: {_col} file not found: {_path}")
+    if not _row["reference"]:
+        _errors.append(f"{_s}: reference is empty")
+    elif not os.path.isfile(_ref_path(_row["reference"])):
+        _errors.append(f"{_s}: reference file not found: {_ref_path(_row['reference'])}")
+if _errors:
+    raise WorkflowError(
+        f"{len(_errors)} problem(s) in sample_sheet {config['sample_sheet']}:\n  " + "\n  ".join(_errors)
+    )
 
 samples = samples.set_index("sample_name", drop=False)
 
