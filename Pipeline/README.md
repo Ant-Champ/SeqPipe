@@ -65,7 +65,8 @@ FASTQ ─ stage ─┤                 ├───┤                 ├─ so
 GenBank ─ FASTA + indexes ────────────────────────────────────────────┤─ large indels + breakpoints ─ annotation
                                                                       ├─ multimers (ONT only)
 filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └──────────────┐
-                └─ plasmid panel screen ─ cassette hotspots ─ IGV snapshots          ├─ summary.tsv
+                ├─ plasmid panel screen                                              ├─ summary.tsv
+                └─ genome + all cassettes ─ junctions ─ insertion sites ─ IGV ───────┘
 ```
 
 | Step | config toggle | ONT | Element / Illumina (SR) |
@@ -80,8 +81,8 @@ filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └�
 | Multimer / concatemer detection | `run_multimer_analysis` | ✓ | skipped (reads too short) |
 | De novo assembly | `run_denovo_assembly` | Flye | Unicycler |
 | Coverage of a shared plasmid panel | `run_plasmid_screen` | ✓ | ✓ |
-| Where cassette-carrying reads land on the reference | `run_cassette_hotspots` | ✓ | ✓ (both mates kept) |
-| IGV pictures of each hotspot | `run_igv_snapshots` | ✓ | ✓ |
+| Where the cassettes of `cassette_dir` are inserted | `run_cassette_search` | ✓ | ✓ (mates resolve identity) |
+| IGV pictures of each insertion site | `run_igv_snapshots` | ✓ | ✓ |
 | `summary.tsv`, one row per sample | always | ✓ | ✓ |
 
 **How a deletion is found.** It shows up in three tables:
@@ -89,8 +90,11 @@ filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └�
 - in `breakpoints`, as an `R` breakpoint at its left edge and an `L` breakpoint at its right edge (soft-clipped reads, with `n_split` reads that align on both sides);
 - in `indels`, as a `DEL`, when reads span it (long reads).
 
-For a gene replaced by a resistance cassette (Keio-style), the plasmid panel screen also finds
-the cassette, and `cassette_hotspots` places it at the gene.
+**How a cassette insertion is found** (`run_cassette_search`, see [3.4](#34-cassettes)). The
+reads are mapped once against the sample's genome plus **all** cassettes. Reads that are
+partly genome and partly cassette mark each junction to the base. A left and a right junction
+together make one insertion site. For a Keio-style replacement, the bases between the two
+junctions are the replaced gene.
 
 ---
 
@@ -163,13 +167,21 @@ column -t -s $'\t' ~/Pipeline/test/results/summary.tsv
 exit                                     # leave the allocation
 ```
 
-The test data is synthetic: a 20 kb chromosome plus a 4 kb plasmid. The strain has **2 SNPs in
-geneA**, and **geneB (bp 9001–10200) is replaced by a 1 kb cassette**. For both test samples
-(`test_ont`, `test_element`) the summary should show:
-- `low_cov_regions` = 1;
-- `breakpoints` = 2;
-- `cassette_hotspots` = 2;
-- `detected_mutations` = 2.
+The test data is synthetic: a 20 kb chromosome plus a 4 kb plasmid. The strain has:
+- **2 SNPs in geneA**;
+- **geneB (bp 9001–10200) replaced by `TEST_Kan_Cassette`**;
+- **geneC (bp 15001–16800) replaced by `TEST_Chlor_Cassette`**, in reverse orientation.
+
+The two test cassettes share identical 150 bp ends, like real Keio cassettes. For both test
+samples (`test_ont`, `test_element`) the summary should show:
+- `detected_mutations` = 2;
+- `low_cov_regions` = 2;
+- `breakpoints` = 4;
+- `cassette_insertions` = `TEST_Kan_Cassette@testchr.1:9002-10199[geneB];TEST_Chlor_Cassette@testchr.1:15000-16800[geneC]`.
+
+The Kan site is 1–2 bp inside the true ends (9000–10200) because the random test sequence
+happens to share a couple of bases with the cassette at those junctions (microhomology). An
+aligner cannot place a junction more precisely than that, and real data behaves the same way.
 
 `test/results/` can be deleted afterwards.
 
@@ -243,12 +255,51 @@ run_sv_scan           : true
 run_multimer_analysis : true
 run_denovo_assembly   : false
 run_plasmid_screen    : false
-run_cassette_hotspots : true     # only used if run_plasmid_screen is true
+run_cassette_search   : false    # true: locate every cassette of cassette_dir, in every sample
 run_igv_snapshots     : false
+cassette_dir          : "/home/antoine9/Pipeline/references/cassettes/"
 ```
 
 Every other parameter is explained in the file itself and in
 [section 6](#6-configuration-reference).
+
+### 3.4 Cassettes
+
+To find where antibiotic cassettes are inserted:
+
+1. Put **one file per cassette** in a folder: GenBank (`.gb`, `.gbk`) or FASTA (`.fasta`, `.fa`).
+   The file name, without its extension, becomes the cassette name in every table:
+   ```
+   /home/antoine9/Pipeline/references/cassettes/
+       KEIO_Kan_Cassette.gb
+       KEIO_Chlor_sfGFP_Cassette.gb
+   ```
+2. In `config.yaml`, set `run_cassette_search : true` and point `cassette_dir` at that folder.
+
+When the search is on, **every sample is searched for every cassette in the folder**. To add a
+cassette, drop its file in the folder. To leave one out, move its file elsewhere.
+
+**When cassettes share sequence.** Keio cassettes have identical FRT / priming-site ends, and
+those ends are exactly where the junction reads fall. The pipeline handles this as follows:
+- **One combined search.** All cassettes are searched together, so a read that fits two
+  cassettes equally well gets mapping quality 0 instead of being given to one of them at random.
+- **The position is always reported.** It is reliable even when the read only covers the shared
+  end.
+- **The cassette's name needs unique evidence.** It is only given from evidence with mapping
+  quality ≥ `cassette_min_mapq`: the read itself (ONT reads usually reach the unique middle of the
+  cassette), or for short reads its mate.
+- **Otherwise the site is labelled honestly:** `ambiguous(A|B)` when nothing unique is seen, or
+  `mixed(A:n,B:m)` when both cassettes have unique support at the same site. `mixed` can mean a
+  mixed population, or two cassettes sitting next to each other.
+- **Read counts per cassette** (`cassette_counts.tsv`) count uniquely mapped reads only, so a
+  shared end cannot make an absent cassette look present.
+  - These counts are primary alignments only. With ONT, most reads that cross a cassette
+    have their primary alignment on the genome, so the counts stay small (a few reads) even
+    for a cassette that is clearly there.
+  - For ONT, judge presence from the insertion sites, not from these counts.
+
+The search does not depend on the plasmid panel screen (`run_plasmid_screen`). The two can be
+switched on independently.
 
 ---
 
@@ -314,7 +365,7 @@ Rule (step) names for `--forcerun` / `--until`:
 - **Alignment:** `align_ont`, `align_sr`.
 - **Variants:** `variant_calling_ont`, `variant_calling_sr`, `filter_variants_ont`, `filter_variants_sr`, `id_gatc_variants`, `annotate_gatc_variants`.
 - **Coverage and SV scan:** `lowcov`, `sv_scan`, `annotate_low_coverage`, `annotate_sv`.
-- **Other analyses:** `detect_multimers`, `assemble_ont`, `assemble_sr`, `plasmid_screen_align`, `cassette_hotspots`.
+- **Other analyses:** `detect_multimers`, `assemble_ont`, `assemble_sr`, `plasmid_screen_align`, `cassette_align_ont`, `cassette_align_sr`, `find_cassette_insertions`.
 - **Summary:** `run_summary`.
 
 ---
@@ -340,7 +391,10 @@ Rule (step) names for `--forcerun` / `--until`:
     <sample>.multimer.summary.tsv     ONT: multimer verdict
     <sample>.assembly.fasta / .assembly_info.txt / .assembly_graph.gfa
     <sample>.plasmid_panel.sorted.bam, <sample>.plasmid_coverage.tsv
-    plasmidic_reads/<sample>.cassette_hotspots.tsv / .bed, igv_cassette_hotspots/*.png
+    annotated/<sample>.cassette_insertions.annotated.tsv   insertion sites (+ replaced genes)
+    annotated/<sample>.cassette_junctions.annotated.tsv    every genome/cassette junction
+    cassettes/<sample>.cassette_counts.tsv                 uniquely mapped reads per cassette
+    cassettes/<sample>.genome_cassettes.sorted.bam         reads vs genome + cassettes (IGV), igv_snapshots/*.png
     logs/<step>.log                   one log per step: look here when something fails
 ```
 
@@ -362,7 +416,7 @@ there but could not be read, and the reason is in `logs/run_summary.log`.
 | `low_cov_regions`, `large_indels`, `breakpoints` | rows in the annotated tables |
 | `multimer`, `multimer_copies`, `multimer_pct` | ONT multimer call |
 | `assembly_contigs`, `assembly_circular` | number of contigs / circular contigs (`skipped` if too little data) |
-| `cassette_hotspots` | number of places where the cassette reads land |
+| `cassette_insertions` | `cassette@contig:start-end[replaced genes]` per site, `;`-separated, `none` if no site. One-sided sites read `cassette@contig:pos(left_only)` |
 
 ### The region tables (low coverage, indels, breakpoints)
 
@@ -388,6 +442,30 @@ How to read them:
 `simple.tsv` columns are `CHROM POS REF ALT %Reads MutationType` (1-based `POS`). `%Reads` is the
 percentage of reads carrying the ALT allele.
 
+### The cassette tables
+
+Coordinates are on the genome, 0-based like the other region tables. Each table ends with the
+`features` column.
+
+| table | columns |
+|---|---|
+| `cassette_insertions` | contig, start, end, length, status, cassette, orientation, n_reads_left, n_reads_right, left_junction, right_junction |
+| `cassette_junctions` | contig, start, end, genome_side, cassette, cassette_end, orientation, n_reads, n_unique, n_ambiguous, support, junction_id |
+| `cassette_counts` | cassette, length, reads_unique, reads_ambiguous, breadth_unique_pct, mean_depth_unique |
+
+The columns, in plain words:
+- **`status`**:
+  - `paired` means a junction was found on both sides. `start`–`end` is then the replaced
+    stretch (`length` bp), and `features` lists the replaced genes.
+  - `left_only` / `right_only` means only one junction was found, for example at low depth or
+    when one side lies in a repeat.
+- **`cassette`**: the cassette's name, `ambiguous(A|B)` (only reads in the shared ends), or
+  `mixed(A:n,B:m)`.
+- **`orientation`**: `+` means the cassette reads in the same direction as the genome.
+- **`support`**: uniquely assigned reads per cassette at that junction.
+- **`genome_side`**: `left` means the genome is on the left of the junction and the cassette
+  continues to the right.
+
 ---
 
 ## 6. Configuration reference
@@ -412,9 +490,12 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `flye_min_coverage` | 10 | skip assembly below this × reference length (clearly labelled, does not fail) |
 | `unicycler_mode` | `normal` | `conservative` / `normal` / `bold` |
 | `plasmid_panel_dir` | — | folder with the panel `.fasta` files |
-| `cassette_reference` | `Chlor_cassette` | record name of the cassette inside the panel |
-| `cassette_hotspot_*` | 1000, 500, 2 | hotspot clustering gap, flank, min reads |
-| `igv_exe`, `igv_heap_mb` | — | IGV launcher. Snapshots also need `xvfb-run` on the node |
+| `cassette_dir` | — | folder with one `.gb`/`.fasta` per cassette. All of them are searched |
+| `cassette_min_mapq` | 20 | evidence below this mapping quality cannot name the cassette |
+| `cassette_min_reads` | 2 | minimum reads for a junction |
+| `cassette_max_span` | 20000 | max distance between the two junctions of one site |
+| `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
+| `igv_exe`, `igv_heap_mb`, `igv_flank` | —, 4000, 1000 | IGV launcher, Java heap, bp shown around a site. Snapshots also need `xvfb-run` on the node |
 | `*_threads`, `*_mem_mb` | see file | per-job resources inside the allocation |
 
 ---
@@ -486,8 +567,11 @@ Changes from those pipelines:
 - **Coverage:** `coverage.4.py` was dropped and replaced by the low-coverage analysis.
 - **Annotation fix:** `id_GATC.2.py` and `annotate.2.py` now use the variant's contig, which
   matters for multi-record references, and fix an off-by-one in feature overlap.
-- **Cassette naming:** "Chlor" naming is generalised to `cassette_*`. The old `chlor_*` config
-  keys are still read.
+- **Cassette search (2026-10-27):** the old method (pull out the reads that hit a cassette in the
+  plasmid panel, re-map them, cluster them into "hotspots") is replaced by `run_cassette_search`.
+  The new search uses junction reads against genome + all cassettes, and handles homology
+  between cassettes. The keys `run_cassette_hotspots`, `cassette_reference`,
+  `cassette_hotspot_*` and `chlor_*` are no longer used.
 - **Assembly bug fixed:** a hard-coded 4.6 Mb minimum that skipped every plasmid assembly.
 - **Execution:** no SLURM job submission any more (`salloc` + `run.sh`). Environments are
   shared by all runs.

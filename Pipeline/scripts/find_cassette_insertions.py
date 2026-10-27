@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""find_cassette_insertions -- antibiotic-cassette insertion sites from a sorted,
+indexed BAM mapped against genome contigs + cassette contigs.
+
+Cassettes usually REPLACE a gene; reads spanning a genome/cassette boundary
+(supplementary / split alignments) give the junctions. Cassettes can share
+homologous ends (e.g. Keio FRT/priming sites), so the cassette part of a
+junction read is often MAPQ 0: the junction POSITION is still used, but the
+cassette IDENTITY is only claimed from uniquely mapped (MAPQ >= min-mapq)
+cassette evidence on the same read or, for short reads, on its mate. Reads
+without such evidence are 'ambiguous' (candidates = the junction segment's
+contig + its secondary / XA alternatives); they are never assigned silently.
+
+Steps: junctions per read (query-adjacent genome + cassette segments, each
+>= min-segment aligned bp) -> clusters by (contig, genome side) -> left/right
+junctions paired into insertion sites (span <= max-span) -> per-cassette counts.
+
+Coordinates are 0-based half-open. A junction 'pos' is the boundary on the
+genome: genome_side 'left' = genome lies at < pos (cassette continues right),
+'right' = genome lies at >= pos. For a paired site start = left pos, end = right
+pos, so length = end - start = genome bases replaced. Outputs are always
+written (header-only when empty).
+
+--out-junctions columns ('#' header line):
+  #contig  start  end  genome_side  cassette  cassette_end  orientation  n_reads
+  n_unique  n_ambiguous  support  junction_id
+  cassette = name | mixed(A:n,B:m) | ambiguous(A|B); support = unique reads per
+  cassette ("A:12,B:0"); orientation '+' = genome and cassette on same strand.
+--out-insertions columns:
+  #contig  start  end  length  status(paired|left_only|right_only)  cassette
+  orientation  n_reads_left  n_reads_right  left_junction  right_junction
+  (first three columns stay contig/start/end so a features column can be appended)
+--out-counts columns:
+  #cassette  length  reads_unique  reads_ambiguous  breadth_unique_pct
+  mean_depth_unique   (primary alignments with MAPQ >= / < min-mapq; breadth and
+  depth from MAPQ >= min-mapq reads only)
+
+Python >= 3.8; needs pysam.
+"""
+import argparse
+import re
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+REF_OPS = (0, 2, 3, 7, 8)       # M D N = X consume reference
+QRY_OPS = (0, 1, 4, 5, 7, 8)    # M I S H = X span the original read
+
+
+def _clips(r):
+    """(ref_start, ref_end, qstart, qend) of an alignment, query interval in the
+    ORIGINAL read orientation (cigar is in reference orientation: flip if reverse)."""
+    ct = r.cigartuples
+    lc = ct[0][1] if ct[0][0] in (4, 5) else 0
+    rc = ct[-1][1] if ct[-1][0] in (4, 5) else 0
+    qlen = sum(n for op, n in ct if op in QRY_OPS)
+    qs, qe = lc, qlen - rc
+    if r.is_reverse:
+        qs, qe = qlen - qe, qlen - qs
+    return r.reference_start, r.reference_end, qs, qe
+
+
+def _xa_contigs(r):
+    """Contigs listed in a bwa XA tag (chr,+pos,CIGAR,NM;...)."""
+    if not r.has_tag("XA"):
+        return set()
+    return {x.split(",")[0] for x in r.get_tag("XA").split(";") if x}
+
+
+def _read_key(r):
+    n = 1 if r.flag & 0x40 else 2 if r.flag & 0x80 else 0
+    return (r.query_name, n)
+
+
+def _cluster(events, tol):
+    """Group dicts (key 'pos') whose sorted positions chain within tol."""
+    if not events:
+        return []
+    events = sorted(events, key=lambda e: e["pos"])
+    clusters, cur = [], [events[0]]
+    for e in events[1:]:
+        if e["pos"] - cur[-1]["pos"] <= tol:
+            cur.append(e)
+        else:
+            clusters.append(cur)
+            cur = [e]
+    clusters.append(cur)
+    return clusters
+
+
+def _call_set(call):
+    """Cassette names behind a call string + its kind (named|mixed|amb)."""
+    m = re.match(r"(mixed|ambiguous)\((.*)\)$", call)
+    if not m:
+        return {call}, "named"
+    if m.group(1) == "mixed":
+        return {x.split(":")[0] for x in m.group(2).split(",")}, "mixed"
+    return set(m.group(2).split("|")) - {"."}, "amb"
+
+
+def _compatible(c1, c2):
+    s1, k1 = _call_set(c1)
+    s2, k2 = _call_set(c2)
+    if k1 == k2 == "named":
+        return s1 == s2
+    return bool(s1 & s2)
+
+
+def _merge_call(c1, c2):
+    s1, k1 = _call_set(c1)
+    s2, k2 = _call_set(c2)
+    for c, k in ((c1, k1), (c2, k2)):               # a named call wins over ambiguous
+        if k == "named":
+            return c
+    for c, k in ((c1, k1), (c2, k2)):
+        if k == "mixed":
+            return c
+    return "ambiguous(%s)" % "|".join(sorted(s1 & s2)) if s1 & s2 else c1
+
+
+def _junctions_of(segs, key, args, cass_set, secs, read_segs):
+    """Junction events of one read. segs: list of
+    [contig, rs, re, strand, mapq, qs, qe, xa_set], sorted by qs."""
+    out = []
+    # identity evidence: unique cassette segments on this read (+ its mate for short reads)
+    srcs = [segs]
+    if args.platform == "short" and key[1] in (1, 2):
+        srcs.append(read_segs.get((key[0], 3 - key[1]), []))
+    uniq = {s[0] for src in srcs for s in src
+            if s[0] in cass_set and s[4] >= args.min_mapq and s[2] - s[1] >= args.min_segment}
+    for a, b in zip(segs, segs[1:]):                # query-adjacent pairs
+        if (a[0] in cass_set) == (b[0] in cass_set):
+            continue
+        if a[2] - a[1] < args.min_segment or b[2] - b[1] < args.min_segment:
+            continue
+        g_first = a[0] not in cass_set
+        g, c = (a, b) if g_first else (b, a)
+        if g[4] < args.min_mapq:                    # genome position must be unique
+            continue
+        # boundary of the genome segment facing the cassette: read-end side if the
+        # genome part comes first in the read, read-start side otherwise;
+        # on + strand read-end = ref_end, on - strand read-end = ref_start
+        at_ref_end = (g[3] == "+") == g_first
+        pos = g[2] if at_ref_end else g[1]
+        side = "left" if at_ref_end else "right"
+        # same for the cassette segment: its boundary faces the genome part
+        # (read-start side if the cassette comes second)
+        c_at_end = (c[3] == "+") == (not g_first)
+        cpos = c[2] if c_at_end else c[1]
+        clen = args.cass_len[c[0]]
+        cend = "5'" if cpos < clen - cpos else "3'"
+        orient = "+" if g[3] == c[3] else "-"
+        if len(uniq) == 1:
+            name, cands = next(iter(uniq)), set(uniq)
+        elif uniq:
+            name, cands = None, set(uniq)           # conflicting
+        else:
+            name = None
+            cands = {c[0]} | (c[7] & cass_set)
+            for sc, sqs, sqe in secs.get(key, []):  # secondary alignments overlapping this segment
+                if sc in cass_set and sqs < c[6] and sqe > c[5]:
+                    cands.add(sc)
+        out.append(dict(contig=g[0], pos=pos, side=side, cend=cend, orient=orient,
+                        key=key, name=name, cands=cands))
+    return out
+
+
+def run(args):
+    import pysam
+    for p in (args.out_junctions, args.out_insertions, args.out_counts):
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+
+    bam = pysam.AlignmentFile(args.bam, "rb")
+    refs = list(bam.references)
+    lens = dict(zip(refs, bam.lengths))
+    cass_list = list(args.cassettes)
+    cass_set = set(cass_list)
+    for c in cass_list:
+        if c not in lens:
+            print(f"find_cassette_insertions: warning: cassette {c} not in BAM", file=sys.stderr)
+    args.cass_len = lens
+    genome = [c for c in refs if c not in cass_set]
+
+    read_segs = defaultdict(list)       # (qname, mate) -> segments
+    secs = defaultdict(list)            # (qname, mate) -> [(contig, qs, qe)] secondary alns
+    interest = set()                    # qnames with any record on a cassette contig
+
+    def add(r):
+        if r.flag & 0x604 or not r.cigartuples:     # unmapped, secondary excluded below
+            return
+        rs, re_, qs, qe = _clips(r)
+        read_segs[_read_key(r)].append(
+            [r.reference_name, rs, re_, "-" if r.is_reverse else "+", r.mapping_quality,
+             qs, qe, _xa_contigs(r)])
+
+    def add_secondary(r):
+        if r.is_unmapped or not r.cigartuples or r.flag & 0x600:
+            return
+        rs, re_, qs, qe = _clips(r)
+        secs[_read_key(r)].append((r.reference_name, qs, qe))
+
+    # ---- pass 1: cassette contigs (counts + reads of interest)
+    counts = []
+    for c in cass_list:
+        if c not in lens:
+            counts.append((c, 0, 0, 0, 0.0, 0.0))
+            continue
+        n_u = n_a = 0
+        for r in bam.fetch(c):
+            if r.is_unmapped or r.flag & 0x600:
+                continue
+            interest.add(r.query_name)
+            if r.flag & 0x100:
+                add_secondary(r)
+                continue
+            add(r)
+            if not r.flag & 0x800:
+                if r.mapping_quality >= args.min_mapq:
+                    n_u += 1
+                else:
+                    n_a += 1
+        cov = bam.count_coverage(
+            c, quality_threshold=0,
+            read_callback=lambda r: not (r.flag & 0xF04) and r.mapping_quality >= args.min_mapq)
+        depth = [sum(x) for x in zip(*cov)]
+        L = lens[c]
+        counts.append((c, L, n_u, n_a, 100.0 * sum(1 for d in depth if d > 0) / max(L, 1),
+                       sum(depth) / max(L, 1)))
+
+    # ---- pass 2: genome contigs, only reads with a cassette alignment
+    for g in genome:
+        for r in bam.fetch(g):
+            if r.is_unmapped or r.flag & 0x200 or r.query_name not in interest:
+                continue
+            if r.flag & 0x100:
+                add_secondary(r)
+            else:
+                add(r)
+    bam.close()
+
+    # ---- junctions per read
+    events = []
+    for key, segs in read_segs.items():
+        if len(segs) < 2:
+            continue
+        segs.sort(key=lambda s: (s[5], s[6]))
+        events.extend(_junctions_of(segs, key, args, cass_set, secs, read_segs))
+
+    by_site = defaultdict(list)
+    for e in events:
+        by_site[(e["contig"], e["side"])].append(e)
+    order = {c: i for i, c in enumerate(refs)}
+
+    junctions = []                      # dicts, sorted later
+    for (contig, side), ev in by_site.items():
+        for cl in _cluster(ev, args.cluster_tol):
+            # one entry per read
+            per_read = {}
+            for e in cl:
+                per_read.setdefault(e["key"], e)
+            reads = list(per_read.values())
+            if len(reads) < args.min_reads:
+                continue
+            pos = sorted(Counter(e["pos"] for e in reads).items(), key=lambda x: (-x[1], x[0]))[0][0]
+            sup = Counter(e["name"] for e in reads if e["name"])
+            n_u = sum(sup.values())
+            cands = set()
+            for e in reads:
+                cands |= e["cands"]
+            if n_u >= args.min_reads and sup.most_common(1)[0][1] >= 0.8 * n_u:
+                call = sup.most_common(1)[0][0]
+            elif len(sup) >= 2:
+                call = "mixed(%s)" % ",".join(f"{k}:{v}" for k, v in sup.most_common())
+            else:
+                call = "ambiguous(%s)" % ("|".join(sorted(cands)) or ".")
+            junctions.append(dict(
+                contig=contig, pos=pos, side=side, call=call, n_reads=len(reads),
+                n_unique=n_u, n_amb=len(reads) - n_u,
+                cend=Counter(e["cend"] for e in reads).most_common(1)[0][0],
+                orient=Counter(e["orient"] for e in reads).most_common(1)[0][0],
+                support=",".join(f"{c}:{sup.get(c, 0)}" for c in cass_list)))
+    junctions.sort(key=lambda j: (order[j["contig"]], j["pos"], j["side"]))
+    for i, j in enumerate(junctions, 1):
+        j["id"] = f"J{i}"
+
+    # ---- pair left/right junctions into sites (smallest span first)
+    cand_pairs = []
+    for l in junctions:
+        if l["side"] != "left":
+            continue
+        for r in junctions:
+            if r["side"] != "right" or r["contig"] != l["contig"]:
+                continue
+            d = r["pos"] - l["pos"]
+            if -args.cluster_tol <= d <= args.max_span and l["orient"] == r["orient"] \
+                    and _compatible(l["call"], r["call"]):
+                cand_pairs.append((abs(d), l["pos"], l, r))
+    cand_pairs.sort(key=lambda x: x[:2])
+    used, sites = set(), []
+    for _, _, l, r in cand_pairs:
+        if l["id"] in used or r["id"] in used:
+            continue
+        used |= {l["id"], r["id"]}
+        s, e = min(l["pos"], r["pos"]), max(l["pos"], r["pos"])
+        sites.append((l["contig"], s, e, e - s, "paired", _merge_call(l["call"], r["call"]),
+                      l["orient"], l["n_reads"], r["n_reads"], l["id"], r["id"]))
+    for j in junctions:
+        if j["id"] in used:
+            continue
+        if j["side"] == "left":
+            sites.append((j["contig"], j["pos"], j["pos"] + 1, 0, "left_only", j["call"],
+                          j["orient"], j["n_reads"], 0, j["id"], "."))
+        else:
+            sites.append((j["contig"], j["pos"], j["pos"] + 1, 0, "right_only", j["call"],
+                          j["orient"], 0, j["n_reads"], ".", j["id"]))
+    sites.sort(key=lambda s: (order[s[0]], s[1], s[2]))
+
+    # ---- write
+    with open(args.out_junctions, "w") as out:
+        out.write("#contig\tstart\tend\tgenome_side\tcassette\tcassette_end\torientation\t"
+                  "n_reads\tn_unique\tn_ambiguous\tsupport\tjunction_id\n")
+        for j in junctions:
+            out.write(f"{j['contig']}\t{j['pos']}\t{j['pos']+1}\t{j['side']}\t{j['call']}\t"
+                      f"{j['cend']}\t{j['orient']}\t{j['n_reads']}\t{j['n_unique']}\t"
+                      f"{j['n_amb']}\t{j['support']}\t{j['id']}\n")
+    with open(args.out_insertions, "w") as out:
+        out.write("#contig\tstart\tend\tlength\tstatus\tcassette\torientation\t"
+                  "n_reads_left\tn_reads_right\tleft_junction\tright_junction\n")
+        for s in sites:
+            out.write("\t".join(str(x) for x in s) + "\n")
+    with open(args.out_counts, "w") as out:
+        out.write("#cassette\tlength\treads_unique\treads_ambiguous\t"
+                  "breadth_unique_pct\tmean_depth_unique\n")
+        for c, L, nu, na, br, md in counts:
+            out.write(f"{c}\t{L}\t{nu}\t{na}\t{br:.1f}\t{md:.2f}\n")
+
+    # ---- summary
+    n_pair = sum(1 for s in sites if s[4] == "paired")
+    print(f"{len(junctions)} junction(s); {len(sites)} site(s) ({n_pair} paired, "
+          f"{len(sites) - n_pair} single-sided)")
+    for s in sites:
+        print(f"  {s[0]}:{s[1]}-{s[2]} {s[4]} {s[5]} {s[6]} len={s[3]}")
+    for c, L, nu, na, br, md in counts:
+        print(f"  {c}: unique={nu} ambiguous={na} breadth={br:.1f}% depth={md:.1f}x")
+    print(f"done -> {args.out_junctions}, {args.out_insertions}, {args.out_counts}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--bam", required=True, help="sorted, indexed BAM (genome + cassette contigs)")
+    ap.add_argument("--cassettes", required=True, nargs="+",
+                    help="names of the cassette contigs in the BAM (all others are genome)")
+    ap.add_argument("--platform", required=True, choices=["ont", "short"],
+                    help="ont: long reads; short: paired reads (mate evidence + XA tag)")
+    ap.add_argument("--min-mapq", type=int, default=20, help="minimum mapping quality for unique evidence [20]")
+    ap.add_argument("--min-segment", type=int, default=30,
+                    help="minimum aligned ref length of each side of a junction (bp) [30]")
+    ap.add_argument("--cluster-tol", type=int, default=10,
+                    help="position tolerance when clustering junctions (bp) [10]")
+    ap.add_argument("--min-reads", type=int, default=2, help="minimum reads supporting a junction [2]")
+    ap.add_argument("--max-span", type=int, default=20000,
+                    help="maximum genome span between paired left/right junctions (bp) [20000]")
+    ap.add_argument("--out-junctions", required=True, help="junctions TSV")
+    ap.add_argument("--out-insertions", required=True, help="insertion sites TSV")
+    ap.add_argument("--out-counts", required=True, help="per-cassette read counts TSV")
+    args = ap.parse_args()
+    try:
+        run(args)
+    except ImportError as e:
+        sys.exit(f"find_cassette_insertions: missing dependency: {e}")
+    except (OSError, ValueError) as e:
+        sys.exit(f"find_cassette_insertions: error: {e}")
+
+
+if __name__ == "__main__":
+    main()

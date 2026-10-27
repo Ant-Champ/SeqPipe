@@ -25,8 +25,10 @@
 # Run with (see README.md):   ./run.sh /path/to/config.yaml
 # ======================================================================
 
+import glob
 import os
 import re
+import sys
 import pandas as pd
 from snakemake.utils import min_version
 
@@ -69,8 +71,13 @@ RUN_SV             = config.get("run_sv_scan", True)
 RUN_MULTIMER       = config.get("run_multimer_analysis", True)
 RUN_DENOVO         = config.get("run_denovo_assembly", False)
 RUN_PLASMID_SCREEN = config.get("run_plasmid_screen", False)
-RUN_HOTSPOTS       = RUN_PLASMID_SCREEN and config.get("run_cassette_hotspots", True)
-RUN_IGV            = RUN_HOTSPOTS and config.get("run_igv_snapshots", False)
+RUN_CASSETTES      = config.get("run_cassette_search", False)
+RUN_IGV            = RUN_CASSETTES and config.get("run_igv_snapshots", False)
+
+if "run_cassette_hotspots" in config:
+    print("WARNING: run_cassette_hotspots / cassette_reference are no longer used: cassette locations "
+          "are now found by run_cassette_search with the cassettes of cassette_dir (see README).",
+          file=sys.stderr)
 
 # Directory of candidate plasmid fasta(s) for the panel-screening branch --
 # the same panel is checked against every sample (see rules/plasmid_screen.smk).
@@ -82,6 +89,35 @@ if RUN_PLASMID_SCREEN and not PLASMID_PANEL_DIR:
     )
 if RUN_IGV and not config.get("igv_exe"):
     raise WorkflowError("run_igv_snapshots is true but igv_exe is not set in config.yaml.")
+
+
+def _find_cassettes(folder):
+    """Every cassette in cassette_dir: one per GenBank/FASTA file, named after
+    the file (file_recordid if a file holds several records)."""
+    from Bio import SeqIO
+    found = []
+    for path in sorted(glob.glob(os.path.join(folder, "*"))):
+        ext = os.path.splitext(path)[1].lower()
+        fmt = {".gb": "genbank", ".gbk": "genbank", ".genbank": "genbank",
+               ".fasta": "fasta", ".fa": "fasta", ".fna": "fasta"}.get(ext)
+        if not fmt:
+            continue
+        stem = os.path.splitext(os.path.basename(path))[0]
+        recs = list(SeqIO.parse(path, fmt))
+        for i, rec in enumerate(recs):
+            name = stem if len(recs) == 1 else f"{stem}_{rec.id}"
+            found.append({"name": re.sub(r"[^\w.-]", "_", name), "path": path, "format": fmt, "index": i})
+    return found
+
+
+CASSETTE_DIR = config.get("cassette_dir", "")
+CASSETTES = []
+if RUN_CASSETTES:
+    if not CASSETTE_DIR or not os.path.isdir(CASSETTE_DIR):
+        raise WorkflowError(f"run_cassette_search is true but cassette_dir is not a folder: '{CASSETTE_DIR}'")
+    CASSETTES = _find_cassettes(CASSETTE_DIR)
+    if not CASSETTES:
+        raise WorkflowError(f"no .gb/.gbk/.fasta/.fa files in cassette_dir ({CASSETTE_DIR})")
 
 
 # ----------------------------------------------------------------------
@@ -161,6 +197,8 @@ if RUN_DENOVO:
     include: "rules/assembly.smk"
 if RUN_PLASMID_SCREEN:
     include: "rules/plasmid_screen.smk"
+if RUN_CASSETTES:
+    include: "rules/cassettes.smk"
 
 include: "rules/summary.smk"
 
@@ -189,14 +227,14 @@ def _rule_all_inputs():
     if RUN_DENOVO:
         d["assemblies"]     = expand(OUT_DIR + "{sample}/{sample}.assembly.fasta", sample=SAMPLE_NAMES)
         d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=SAMPLE_NAMES)
-    if RUN_HOTSPOTS:
-        d["cassette_hotspots"] = expand(
-            OUT_DIR + "{sample}/plasmidic_reads/{sample}.cassette_hotspots.tsv", sample=SAMPLE_NAMES
+    if RUN_CASSETTES:
+        d["cassette_tables"] = expand(
+            OUT_DIR + "{sample}/annotated/{sample}.cassette_{table}.annotated.tsv",
+            sample=SAMPLE_NAMES, table=["insertions", "junctions"]
         )
+        d["cassette_counts"] = expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=SAMPLE_NAMES)
     if RUN_IGV:
-        d["cassette_igv_snapshots"] = expand(
-            OUT_DIR + "{sample}/plasmidic_reads/igv_cassette_hotspots", sample=SAMPLE_NAMES
-        )
+        d["cassette_igv_snapshots"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=SAMPLE_NAMES)
     if RUN_COVERAGE or RUN_PLASMID_SCREEN:
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"
     return d

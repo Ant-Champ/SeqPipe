@@ -28,7 +28,7 @@ COLUMNS = [
     "pct_mapped", "mean_depth", "min_replicon_breadth",
     "detected_mutations", "low_cov_regions", "large_indels", "breakpoints",
     "multimer", "multimer_copies", "multimer_pct",
-    "assembly_contigs", "assembly_circular", "cassette_hotspots",
+    "assembly_contigs", "assembly_circular", "cassette_insertions",
 ]
 
 
@@ -240,10 +240,25 @@ def summarize_sample(s, out_dir, tg):
         a = try_(name, "assembly_info", lambda: assembly_stats(base + ".assembly_info.txt"),
                  default=(ERR, ERR))
         rec["assembly_contigs"], rec["assembly_circular"] = a
-    if tg.get("hotspots"):
-        rec["cassette_hotspots"] = try_(name, "cassette_hotspots", lambda: count_rows(
-            os.path.join(d, "plasmidic_reads", name + ".cassette_hotspots.tsv")))
+    if tg.get("cassettes"):
+        rec["cassette_insertions"] = try_(name, "cassette_insertions", lambda: cassette_sites(
+            os.path.join(d, "annotated", name + ".cassette_insertions.annotated.tsv")))
     return rec
+
+
+def cassette_sites(path):
+    """'cassette@contig:start-end(genes)' per insertion site, ';'-joined; 'none' if no site.
+    Columns: contig start end length status cassette orientation ... features."""
+    sites = []
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            c = line.rstrip("\n").split("\t")
+            genes = sorted({f.split(":", 1)[1].split("(")[0] for f in c[-1].split(";") if ":" in f})
+            where = f"{c[0]}:{c[1]}-{c[2]}" if c[4] == "paired" else f"{c[0]}:{c[1]}({c[4]})"
+            sites.append(f"{c[5]}@{where}" + (f"[{','.join(genes)}]" if genes else ""))
+    return ";".join(sites) if sites else "none"
 
 
 def run(samples, out_dir, toggles, out_path):

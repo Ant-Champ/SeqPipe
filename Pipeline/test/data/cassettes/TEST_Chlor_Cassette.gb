@@ -1,0 +1,40 @@
+LOCUS       TEST_Chlor_Cassette        1300 bp    DNA     linear   BCT 01-JAN-2026
+DEFINITION  synthetic test sequence TEST_Chlor_Cassette.
+ACCESSION   TEST_Chlor_Cassette
+VERSION     TEST_Chlor_Cassette.1
+KEYWORDS    .
+SOURCE      synthetic
+  ORGANISM  synthetic
+            .
+FEATURES             Location/Qualifiers
+     source          1..1300
+                     /organism="synthetic"
+     gene            151..1150
+                     /gene="cat"
+     CDS             151..1150
+                     /gene="cat"
+                     /product="chloramphenicol resistance"
+ORIGIN
+        1 ccttatttca agatgtaatc catggcaggc cacacgcccg caaagcttga gctagcccgg
+       61 gttcaaaatt aagccccctg catctactcc ccgcgcgggc aagaatggtc ttattaagga
+      121 gcatgcaaga tgttgcctcc tcgagggggg aggaagcgct ttccttatca gagtcggctc
+      181 tgtgcggtct caacttaaaa agtcaaagag aattccggtt ctgtagaaca ggaacctctc
+      241 tgtaggtatc ccatatcagc tacgggtata aacgacaatg tagtcttatc caatccgctc
+      301 gggcatcact gctcagctgt gataccactg aaatccgggt tctacatgtc gccgctcgga
+      361 tttgatttca gcaccctcca aaacgtagcg taatcagcac cgcctactag tttaccggat
+      421 cgcttaattt cgacagcgca tagccactac atagtgattt aaacattaag tgagtacata
+      481 gggaaattaa gggtgccgtt gcgtgggggc taggcctgag ccctggagca acaataagga
+      541 gatctatatg gattatatgt ggcgcaagtt gattgtggac aactccgcta caggcaaatc
+      601 cagtttgtgc catatactgt ggtgaaccac atctacgaat gtacgtataa cccacctagc
+      661 tttaagggat cgcgaaccta ccgacttact tctagcgtaa cgaactccct ccacatatat
+      721 tcccgattat tactatgccg atgtctatcc gccggactca gtacaataag acaggttagg
+      781 taaaaacggt tagtcccgac tacttaatac aataacaccc tacttcttca ttgattctat
+      841 ttacgtgtag cccgggggcc attgggatac accatagaac aactaggagg cgcgatccga
+      901 actcttactc acgtgttatc gtttatgacc tcttttaggt acaaaccaac ggccgaaacc
+      961 gggtccgggg cccacgttat ctccaattaa ttgttgtggg tacagaagct cagtaacaag
+     1021 tacccggcac tacaaccgag tcttaggtcc ttactctttc gctagggtta tcaatctgac
+     1081 ttcgtgccag aggcactagg ctcaggggcg ggtcccaccc tcgatcatat caatcatgtt
+     1141 gatatatggt caagttgcgc gttgcctcaa tcacacgact aacggcattg tcgttgaata
+     1201 cgcctcctct gctgccattc gccttaccta atggaaatta aagcggttac cgatcctcaa
+     1261 cgcgaaacga cgagattgag cgacttttcc tagcatttcc
+//

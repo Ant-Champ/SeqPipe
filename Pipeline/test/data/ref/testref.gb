@@ -18,12 +18,12 @@ FEATURES             Location/Qualifiers
                      /gene="geneB"
      CDS             9001..10200
                      /gene="geneB"
-                     /product="test protein B (deleted in strain)"
+                     /product="test protein B (replaced by Kan cassette in strain)"
      gene            15001..16800
                      /gene="geneC"
      CDS             15001..16800
                      /gene="geneC"
-                     /product="test protein C"
+                     /product="test protein C (replaced by Chlor cassette in strain)"
 ORIGIN
         1 cagattttca tattatgcag aaaatctact tcgcctgata cgagtcggtt atcttcggat
        61 actgtatagt cccacctggt gatcctatgc ttgtgagtac ccagaaaata gcgacggacc

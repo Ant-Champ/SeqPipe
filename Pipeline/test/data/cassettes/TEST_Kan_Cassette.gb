@@ -1,0 +1,43 @@
+LOCUS       TEST_Kan_Cassette        1500 bp    DNA     linear   BCT 01-JAN-2026
+DEFINITION  synthetic test sequence TEST_Kan_Cassette.
+ACCESSION   TEST_Kan_Cassette
+VERSION     TEST_Kan_Cassette.1
+KEYWORDS    .
+SOURCE      synthetic
+  ORGANISM  synthetic
+            .
+FEATURES             Location/Qualifiers
+     source          1..1500
+                     /organism="synthetic"
+     gene            151..1350
+                     /gene="kan"
+     CDS             151..1350
+                     /gene="kan"
+                     /product="kanamycin resistance"
+ORIGIN
+        1 ccttatttca agatgtaatc catggcaggc cacacgcccg caaagcttga gctagcccgg
+       61 gttcaaaatt aagccccctg catctactcc ccgcgcgggc aagaatggtc ttattaagga
+      121 gcatgcaaga tgttgcctcc tcgagggggg agcttccacg gacgggtgct ggcccgtaag
+      181 acgggcatca atttgggagt agccggtgct gggtcggtcg tgcgctaccc ggcgtactag
+      241 aggattatcc gcgggttttt agagagtcac ccacctggca ttttggaaca tatttctggg
+      301 cacccggtgc gtgagtcgcc acaatttcgt aaagcacaaa aatataaagc atcgggtttt
+      361 tcactgggta gcacttgtcc acgttacagc atcgtcctca gtttacgtca tgacgtcacg
+      421 catagaaaaa agtacatgtc agtgttctta tacctgtcgg ctggtcacac ccggcccaac
+      481 cgattatgtt cggcttcttc cgcgtcacag ccttatcttg aggatgtttc catcacctgg
+      541 ctttcgcccc atatgtttcg tccatgccat acagcgtgcg tgacctccgg aattgcgaga
+      601 gccggaggca catctaaccg tctgcgtatt cctctggcgt tagagttgag gtcttgtcaa
+      661 acctcttgct gaatttttag taggtcgttt agagaatacc gggcgctgat cgacgggctt
+      721 ataatacgca aatccgcggg cattctcatt catgccagca ctaagttcgg gttcctcata
+      781 accatggccc ctcccataca gaactaatgc ggttgctctt cctaggttct catgacgccc
+      841 ccttttgagt cgtctcatcg acgaagggag gttctctctt cgcggtgtgc gtataccagt
+      901 tcaacgatat gtcagttcga ggtgtagacg agatctgacc acgttaattt tgttcgctta
+      961 acctcaaaca tgctctccta ggggaattga cccatcagtg gcgacctctg tctggaacgc
+     1021 cggaccgtag tgtatctgcc gcttctgatg ctgtttagac ttcacatgat tggatcagct
+     1081 aacggcggag gctgctaagc gtcattacag agcattgcgt ttctcactgt ctggcaacgt
+     1141 acatcggaga atcacgaaac taactaggtg ccagctagac tacgcaggcc tgacagactt
+     1201 aattagtatc ggagagactt ctcaaaatta acagacatac catacctaca ttaaacttca
+     1261 aaccaggttc tcgatcacgc taatgggtgg ggtggtctcc actaagaatg caacggtaaa
+     1321 tctgtatccg gtgccatcac tttaaagatt caagttgcgc gttgcctcaa tcacacgact
+     1381 aacggcattg tcgttgaata cgcctcctct gctgccattc gccttaccta atggaaatta
+     1441 aagcggttac cgatcctcaa cgcgaaacga cgagattgag cgacttttcc tagcatttcc
+//

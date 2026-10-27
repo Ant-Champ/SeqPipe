@@ -26,9 +26,9 @@ def _run_summary_inputs():
         d["multimer"] = expand(OUT_DIR + "{sample}/{sample}.multimer.summary.tsv", sample=ONT_SAMPLES)
     if RUN_DENOVO:
         d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=SAMPLE_NAMES)
-    if RUN_HOTSPOTS:
-        d["cassette_hotspots"] = expand(
-            OUT_DIR + "{sample}/plasmidic_reads/{sample}.cassette_hotspots.tsv", sample=SAMPLE_NAMES
+    if RUN_CASSETTES:
+        d["cassette_insertions"] = expand(
+            OUT_DIR + "{sample}/annotated/{sample}.cassette_insertions.annotated.tsv", sample=SAMPLE_NAMES
         )
     return d
 
@@ -50,7 +50,7 @@ rule run_summary:
             "sv":        bool(RUN_SV),
             "multimer":  bool(RUN_MULTIMER and ONT_SAMPLES),
             "denovo":    bool(RUN_DENOVO),
-            "hotspots":  bool(RUN_HOTSPOTS),
+            "cassettes": bool(RUN_CASSETTES),
         },
     conda:
         "../envs/python.yaml"

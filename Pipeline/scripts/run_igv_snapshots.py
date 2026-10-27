@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Create and execute IGV batch scripts for cassette hotspots.
+Create and execute IGV batch scripts for cassette insertion sites.
 
 This script:
   1. Converts the sample GenBank annotation to GFF3.
   2. Creates an IGV genome JSON using the sample FASTA.
   3. Creates an IGV batch file loading:
-       - all-read BAM
-       - cassette-read BAM
+       - all-read BAM (sample vs genome)
+       - cassette BAM (sample vs genome + cassette contigs)
        - GenBank-derived GFF3 annotations
-  4. Visits each hotspot's expanded interval (hotspot +/- flank, from the
-     hotspot table) and saves a PNG snapshot.
+  4. Visits each insertion region (--regions = the insertions table of
+     find_cassette_insertions.py, '#' header skipped, first three columns
+     contig/start/end 0-based half-open, status = column 5, cassette = column
+     6; an extra trailing 'features' column is ignored) +/- --flank bp and
+     saves a PNG snapshot per region.
 
-If there are no hotspots, a NO_<LABEL>_HOTSPOTS.txt marker is written
+If there are no regions, a NO_CASSETTE_INSERTIONS.txt marker is written
 instead and IGV is not run.
 """
 import argparse
@@ -29,16 +32,21 @@ from Bio import SeqIO
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--hotspots", required=True)
-    p.add_argument("--all-bam", required=True)
-    p.add_argument("--cassette-bam", required=True)
+    p.add_argument("--regions", required=True,
+                   help="insertions TSV from find_cassette_insertions.py")
+    p.add_argument("--flank", type=int, default=1000,
+                   help="bp added on each side of every region (default: 1000)")
+    p.add_argument("--all-bam", required=True,
+                   help="BAM of the sample mapped to its genome")
+    p.add_argument("--cassette-bam", required=True,
+                   help="BAM of the sample mapped to genome + cassette contigs")
     p.add_argument("--reference", required=True)
     p.add_argument("--genbank", required=True)
     p.add_argument("--outdir", required=True)
     p.add_argument("--igv", required=True)
     p.add_argument("--label", default="Cassette",
-                   help="name of the cassette, used in messages and the "
-                        "NO_<LABEL>_HOTSPOTS.txt marker (default: Cassette)")
+                   help="name used in messages and the "
+                        "NO_CASSETTE_INSERTIONS.txt marker (default: Cassette)")
     p.add_argument("--memory", type=int, default=4000,
                    help="IGV Java heap in MB, applied via _JAVA_OPTIONS=-Xmx<memory>m "
                         "(default: 4000)")
@@ -119,39 +127,35 @@ def main():
                         f"{';'.join(attrs)}\n"
                     )
 
-    # Read hotspots.
-    hotspots = []
-    with open(args.hotspots) as fh:
-        header = fh.readline().rstrip("\n").split("\t")
-        required = {
-            "hotspot", "chrom", "start", "end",
-            "expanded_start", "expanded_end"
-        }
-        missing = required - set(header)
-        if missing:
-            raise SystemExit(
-                f"Hotspot table is missing columns: {', '.join(sorted(missing))}"
-            )
-
-        col = {name: i for i, name in enumerate(header)}
+    # Read regions (insertions table: contig start end length status cassette ...).
+    chrom_len = {r.id: len(r.seq) for r in SeqIO.parse(str(reference), "fasta")}
+    regions = []
+    with open(args.regions) as fh:
         for line in fh:
-            if not line.strip():
+            if not line.strip() or line.startswith("#"):
                 continue
             fields = line.rstrip("\n").split("\t")
-            hotspots.append({
-                "id": fields[col["hotspot"]],
-                "chrom": fields[col["chrom"]],
-                "start": int(fields[col["start"]]),
-                "end": int(fields[col["end"]]),
-                "expanded_start": int(fields[col["expanded_start"]]),
-                "expanded_end": int(fields[col["expanded_end"]]),
+            if len(fields) < 6:
+                raise SystemExit(
+                    f"Regions table needs >= 6 columns (contig start end length status "
+                    f"cassette), got {len(fields)}: {line.strip()}"
+                )
+            start, end = int(fields[1]), int(fields[2])
+            chrom = fields[0]
+            top = chrom_len.get(chrom, end + args.flank)
+            regions.append({
+                "chrom": chrom,
+                "start": start,
+                "end": end,
+                "label": re.sub(r"[^A-Za-z0-9._-]+", "_", f"{fields[4]}_{fields[5]}").strip("_"),
+                "expanded_start": max(0, start - args.flank),
+                "expanded_end": min(top, end + args.flank),
             })
 
-    # If there are no hotspots, leave a clear marker and finish successfully.
-    if not hotspots:
-        tag = re.sub(r"[^A-Za-z0-9]+", "_", args.label).strip("_").upper() or "CASSETTE"
-        (outdir / f"NO_{tag}_HOTSPOTS.txt").write_text(
-            f"No {args.label} hotspots passed the configured minimum-read threshold.\n"
+    # If there are no regions, leave a clear marker and finish successfully.
+    if not regions:
+        (outdir / "NO_CASSETTE_INSERTIONS.txt").write_text(
+            f"No {args.label} insertion sites were found.\n"
         )
         return
 
@@ -189,13 +193,14 @@ def main():
         "setSleepInterval 1500",
     ]
 
-    for h in hotspots:
+    for i, h in enumerate(regions, start=1):
         locus = (
             f'{h["chrom"]}:{h["expanded_start"] + 1}-'
             f'{h["expanded_end"]}'
         )
+        chrom_tag = re.sub(r"[^A-Za-z0-9._-]+", "_", h["chrom"])
         snapshot_name = (
-            f'{h["id"]}_{h["chrom"]}_'
+            f'{i:02d}_{h["label"]}_{chrom_tag}_'
             f'{h["start"] + 1}-{h["end"]}.png'
         )
 

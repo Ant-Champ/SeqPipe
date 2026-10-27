@@ -2,14 +2,17 @@
 """Generate the small synthetic dataset used by `./run.sh test` and `./run.sh setup`.
 
 Reference (test/data/ref/testref.gb): a 20 kb circular "chromosome" with three
-CDS + a 4 kb plasmid. The sequenced strain is the reference with geneB
-(bp 9001-10200) replaced by a 1 kb resistance cassette, Keio-style, so the run
-should report: low coverage + breakpoints over geneB, cassette hotspot there,
-and two SNPs in geneA.
+CDS + a 4 kb plasmid. The sequenced strain is the reference with 2 SNPs in
+geneA, geneB (bp 9001-10200) replaced by a Kan cassette and geneC
+(bp 15001-16800) by a Chlor cassette in reverse orientation, Keio-style. The
+two cassettes share identical 150 bp ends, like real Keio cassettes. The run
+should report: 2 SNPs in geneA, low coverage + breakpoints over geneB and
+geneC, and two cassette insertions (Kan in geneB, Chlor in geneC).
 
 Writes (all small, committed to the repository):
   data/ref/testref.gb           GenBank reference (2 records)
-  data/panel/panel.fasta        plasmid panel: Chlor_cassette + an absent plasmid
+  data/cassettes/*.gb           TEST_Kan_Cassette, TEST_Chlor_Cassette
+  data/panel/panel.fasta        plasmid panel: the strain's plasmid + an absent plasmid
   data/fastq/barcode01.fastq.gz ONT reads (~40x, 1 % errors)
   data/fastq/sr_R1/R2.fastq.gz  paired 75 bp short reads (~60x)
 Only the python standard library is used; output is deterministic (seed 1).
@@ -77,31 +80,39 @@ def sample_circular(genome, start, length):
 def main():
     chrom = rand_seq(20000)
     plasmid = rand_seq(4000)
-    cassette = rand_seq(1000)
     absent = rand_seq(3000)
+    # Keio-like cassettes: identical 150 bp ends (FRT / priming sites), unique middles
+    end5, end3 = rand_seq(150), rand_seq(150)
+    kan = end5 + rand_seq(1200) + end3            # 1500 bp
+    chlor = end5 + rand_seq(1000) + end3          # 1300 bp
 
     feats_chr = [(2001, 3500, "geneA", "test protein A"),
-                 (9001, 10200, "geneB", "test protein B (deleted in strain)"),
-                 (15001, 16800, "geneC", "test protein C")]
+                 (9001, 10200, "geneB", "test protein B (replaced by Kan cassette in strain)"),
+                 (15001, 16800, "geneC", "test protein C (replaced by Chlor cassette in strain)")]
     feats_pl = [(501, 1300, "repA", "replication protein")]
 
-    # strain = reference with 2 SNPs in geneA and geneB replaced by the cassette
+    # strain = reference with 2 SNPs in geneA, geneB replaced by the Kan cassette
+    # (forward) and geneC by the Chlor cassette (reverse orientation)
     strain = list(chrom)
     for pos in (2500, 3000):                       # 1-based positions
         strain[pos - 1] = "A" if strain[pos - 1] != "A" else "C"
     strain = "".join(strain)
-    strain = strain[:9000] + cassette + strain[10200:]
+    strain = strain[:9000] + kan + strain[10200:15000] + revcomp(chlor) + strain[16800:]
     replicons = [(strain, 1.0), (plasmid, 2.0)]    # plasmid at 2 copies / cell
 
-    (HERE / "ref").mkdir(parents=True, exist_ok=True)
-    (HERE / "panel").mkdir(parents=True, exist_ok=True)
-    (HERE / "fastq").mkdir(parents=True, exist_ok=True)
+    for d in ("ref", "panel", "cassettes", "fastq"):
+        (HERE / d).mkdir(parents=True, exist_ok=True)
 
     with open(HERE / "ref" / "testref.gb", "w", newline="\n") as fh:
         fh.write(genbank("testchr", chrom, feats_chr))
         fh.write(genbank("testplasmid", plasmid, feats_pl))
+    with open(HERE / "cassettes" / "TEST_Kan_Cassette.gb", "w", newline="\n") as fh:
+        fh.write(genbank("TEST_Kan_Cassette", kan, [(151, 1350, "kan", "kanamycin resistance")], circular=False))
+    with open(HERE / "cassettes" / "TEST_Chlor_Cassette.gb", "w", newline="\n") as fh:
+        fh.write(genbank("TEST_Chlor_Cassette", chlor, [(151, 1150, "cat", "chloramphenicol resistance")], circular=False))
+    # plasmid panel: the sample's plasmid (present) + one absent plasmid
     with open(HERE / "panel" / "panel.fasta", "w", newline="\n") as fh:
-        fh.write(f">Chlor_cassette\n{cassette}\n>absent_plasmid\n{absent}\n")
+        fh.write(f">present_plasmid\n{plasmid}\n>absent_plasmid\n{absent}\n")
 
     # ONT reads: lengths 1-6 kb, ~40x per copy, 1 % errors, both strands
     with gzip.open(HERE / "fastq" / "barcode01.fastq.gz", "wt") as fh:
