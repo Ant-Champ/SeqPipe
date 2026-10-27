@@ -33,7 +33,8 @@ tmux new -s pipeline
 salloc --account=def-rodrigu1 --time=6:00:00 --cpus-per-task=16 --mem=64G
 ~/Pipeline/run.sh ~/runs/MY_RUN/config.yaml
 
-# 5. results: start with <out_dir>/summary.tsv
+# 5. results: copy <out_dir>/report.html to your PC and open it in a browser
+#    (or read <out_dir>/summary.tsv on the cluster)
 ```
 
 If the connection drops, log back in to **the same login node** and run `tmux attach -t pipeline`.
@@ -66,7 +67,7 @@ GenBank ─ FASTA + indexes ─────────────────�
                                                                       ├─ multimers (ONT only)
 filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └──────────────┐
                 ├─ plasmid panel screen                                              ├─ summary.tsv
-                └─ genome + all cassettes ─ junctions ─ insertion sites ─ IGV ───────┘
+                └─ genome + all cassettes ─ junctions ─ insertion sites ─ IGV ───────┴─ report.html
 ```
 
 | Step | config toggle | ONT | Element / Illumina (SR) |
@@ -84,6 +85,7 @@ filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └�
 | Where the cassettes of `cassette_dir` are inserted | `run_cassette_search` | ✓ | ✓ (mates resolve identity) |
 | IGV pictures of each insertion site | `run_igv_snapshots` | ✓ | ✓ |
 | `summary.tsv`, one row per sample | always | ✓ | ✓ |
+| `report.html`: every result, by sample or by analysis, with coverage plots and the IGV pictures | `run_html_report` (default on) | ✓ | ✓ |
 
 **How a deletion is found.** It shows up in three tables:
 - in `low_coverage`, as a region with `min_depth` 0 over the deleted gene;
@@ -377,7 +379,7 @@ Rule (step) names for `--forcerun` / `--until`:
 - **Variants:** `variant_calling_ont`, `variant_calling_sr`, `filter_variants_ont`, `filter_variants_sr`, `id_gatc_variants`, `annotate_gatc_variants`.
 - **Coverage and SV scan:** `lowcov`, `sv_scan`, `annotate_low_coverage`, `annotate_sv`.
 - **Other analyses:** `detect_multimers`, `assemble_ont`, `assemble_sr`, `plasmid_screen_align`, `cassette_align_ont`, `cassette_align_sr`, `find_cassette_insertions`.
-- **Summary:** `run_summary`.
+- **Summary and report:** `run_summary`, `depth_profile`, `html_report`.
 
 ---
 
@@ -385,7 +387,8 @@ Rule (step) names for `--forcerun` / `--until`:
 
 ```
 <out_dir>/
-  summary.tsv                         <- start here: one row per sample
+  report.html                         <- start here: everything in one page (see 5.1)
+  summary.tsv                         <- one row per sample
   coverage_summary.tsv                <- every sample x replicon (reference + plasmid panel): breadth, depth
   <sample>/
     <sample>.sorted.bam(.bai)         alignment to the sample's reference (open in IGV with <sample>.ref.fasta)
@@ -406,8 +409,51 @@ Rule (step) names for `--forcerun` / `--until`:
     annotated/<sample>.cassette_junctions.annotated.tsv    every genome/cassette junction
     cassettes/<sample>.cassette_counts.tsv                 uniquely mapped reads per cassette
     cassettes/<sample>.genome_cassettes.sorted.bam         reads vs genome + cassettes (IGV), igv_snapshots/*.png
+    coverage/<sample>.depth_bins.tsv  binned depth along each replicon (for the report plots)
     logs/<step>.log                   one log per step: look here when something fails
 ```
+
+### 5.1 The HTML report
+
+`report.html` is one file: copy it to your PC and open it in any browser. It needs no internet
+connection. To copy it, use WinSCP, or from WSL:
+
+```bash
+scp narval:~/runs/MY_RUN/results/report.html /mnt/c/Users/Ant/Downloads/
+```
+
+The two buttons at the top switch between two views:
+- **By sample:** pick a sample on the left. Its page shows key numbers, then every analysis for
+  that sample: read QC, coverage plots, variants, low coverage, indels and breakpoints,
+  cassettes with their IGV pictures, plasmid panel, multimers and assembly.
+- **By analysis:** pick an analysis on the left. Its page shows that analysis for every sample,
+  in one table with a `sample` column. *Overview* holds `summary.tsv` and the run settings.
+  *Plasmid panel* shows a sample × plasmid presence matrix.
+
+The coverage plots show depth along each replicon, with coloured marks:
+
+| Colour | Meaning |
+|---|---|
+| red band | low-coverage region |
+| green | cassette insertion |
+| orange line | breakpoint |
+| purple | large indel |
+| black tick | variant |
+| grey | genes (shown below 300 kb of view) |
+
+To use the plots:
+- Drag across a plot to zoom; double-click it to reset.
+- Hover over a plot to see the depth, gene and event at that position.
+- **Click a row of any table that has a position** (variant, low-coverage region, breakpoint,
+  cassette site) to jump to that place on the sample's plot.
+
+Tables can be sorted (click a column header) and filtered (type in the box). A table keeps its
+first 5000 rows; the TSV on disk is complete.
+
+The IGV pictures appear when `run_igv_snapshots` is on. They are embedded in the file;
+set `report_embed_igv: false` to link to the PNG files instead and keep `report.html` small. The
+links to the fastp reports and the assemblies are relative, so they only work if `report.html`
+stays in `<out_dir>`, or if you copy the whole `<out_dir>`.
 
 ### summary.tsv columns
 
@@ -507,6 +553,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `igv_exe`, `igv_heap_mb`, `igv_flank` | —, 4000, 1000 | IGV launcher, Java heap, bp shown around a site. Snapshots also need `xvfb-run` on the node |
+| `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
+| `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
+| `report_embed_igv` | true | put the IGV pictures inside `report.html` (false: link to the PNG files) |
 | `*_threads`, `*_mem_mb` | see file | per-job resources inside the allocation |
 
 ---

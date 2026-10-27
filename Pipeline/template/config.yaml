@@ -25,6 +25,7 @@ run_denovo_assembly   : false   # ONT: Flye       | short reads: Unicycler
 run_plasmid_screen    : false   # map reads against a shared panel of plasmids (plasmid_panel_dir)
 run_cassette_search   : false   # where the cassettes of cassette_dir are inserted in the genome (all samples, all cassettes)
 run_igv_snapshots     : false   #   + IGV pictures of each insertion site (needs igv_exe and xvfb-run)
+run_html_report       : true    # <out_dir>/report.html: every result by sample / by analysis, coverage plots, IGV pictures
 
 # --- general ------------------------------------------------------------
 stage_mode : "symlink"   # symlink (saves disk) | copy -- how raw FASTQs are brought into out_dir
@@ -127,6 +128,10 @@ igv_flank   : 1000   # bp shown on each side of an insertion site
 igv_exe     : ""
 igv_heap_mb : 4000   # Java heap given to IGV
 igv_mem_mb  : 6000   # memory reserved for the IGV job (heap + overhead)
+
+# --- HTML report (run_html_report) ----------------------------------------
+report_max_bins  : 20000  # depth points per replicon in the plots (4.6 Mb genome -> 230 bp per point)
+report_embed_igv : true   # IGV pictures inside report.html (false: links to the PNGs, smaller file)
 
 # --- analysis scripts (optional) -------------------------------------------
 # Scripts are taken from <pipeline>/scripts. To try another version of a

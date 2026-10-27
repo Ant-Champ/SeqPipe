@@ -91,5 +91,6 @@ echo "+ ${cmd[*]}"
 if [ "$mode" = setup ]; then
     echo "All conda environments are built in $CONDA_ENVS_DIR"
 elif [ "$dry" = no ]; then
-    echo "Done. Start with: $(grep -E '^out_dir' "$config" | sed -E 's/^out_dir *: *"?([^"]*)"?.*/\1/')summary.tsv"
+    out=$(grep -E '^out_dir' "$config" | sed -E 's/^out_dir *: *"?([^"]*)"?.*/\1/')
+    echo "Done. Start with: ${out}report.html (copy it to your PC and open it in a browser) or ${out}summary.tsv"
 fi
