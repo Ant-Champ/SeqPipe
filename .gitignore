@@ -1,4 +1,5 @@
 .snakemake/
+.conda_envs/
 results/
 logs/
 __pycache__/

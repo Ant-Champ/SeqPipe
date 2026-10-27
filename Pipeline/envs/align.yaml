@@ -1,0 +1,6 @@
+channels: [conda-forge, bioconda]
+dependencies:
+  - minimap2>=2.24
+  - samtools>=1.17
+  - bcftools>=1.17
+  - bwa-mem2>=2.2.1

@@ -1,0 +1,5 @@
+sample_name	platform	reads1	reads2	reference
+KEIO_ylcJ_ont	ont	barcode05		ecoli_BW25113
+KEIO_ylcI_ont	ont	/full/path/to/barcode06.fastq.gz		ecoli_BW25113
+ylcJ	element	/full/path/to/ylcJ_R1.fastq.gz	/full/path/to/ylcJ_R2.fastq.gz	ecoli_BW25113
+acnB_acnA	element	/full/path/to/acnB_acnA_R1.fastq.gz	/full/path/to/acnB_acnA_R2.fastq.gz

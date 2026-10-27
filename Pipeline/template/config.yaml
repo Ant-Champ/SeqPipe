@@ -1,0 +1,132 @@
+# ======================================================================
+# Run configuration -- copy this file into your run folder and edit it.
+#   cp <pipeline>/template/config.yaml  <run folder>/config.yaml
+# Paths: absolute paths are safest.
+# ======================================================================
+
+# --- I/O paths --------------------------------------------------------
+out_dir      : "/path/to/run/results/"
+sample_sheet : "/path/to/run/sample_sheet.tsv"
+ref_dir      : "/path/to/run/genbank_files/"    # GenBank references (.gb), see `reference` column
+fastq_dir    : "/path/to/run/fastq/"            # used for ONT barcodes and relative FASTQ paths
+
+# ONT barcodes in the sheet's reads1 column become
+#   {fastq_dir}{fastq_base_name}{barcode}.fastq.gz
+# Use "" if your files are just {barcode}.fastq.gz
+fastq_base_name : ""
+
+# Reference used for samples whose `reference` column is empty
+# (name of a .gb file in ref_dir, with or without .gb). "" = none.
+default_reference : ""
+
+# --- analysis toggles (apply to the whole run, not per sample) --------
+# Alignment to each sample's reference, read statistics and summary.tsv
+# always run. Steps that don't apply to a read type are skipped for it.
+run_read_filtering    : true    # ONT: filtlong   | short reads: fastp
+run_variant_calling   : true    # ONT: medaka     | short reads: bcftools  -> <sample>.simple.tsv
+run_gatc_annotation   : true    #   + GATC-site and gene annotation (needs run_variant_calling)
+run_coverage_analysis : true    # coverage per replicon + annotated low-coverage regions
+run_sv_scan           : true    # large indels + breakpoints (deleted / moved regions), annotated
+run_multimer_analysis : true    # multimer / concatemer detection (ONT samples only)
+run_denovo_assembly   : false   # ONT: Flye       | short reads: Unicycler
+run_plasmid_screen    : false   # map reads against a shared panel of plasmids (plasmid_panel_dir)
+run_cassette_hotspots : true    #   + where cassette-carrying reads land on the reference (needs run_plasmid_screen)
+run_igv_snapshots     : false   #   + IGV pictures of each hotspot (needs igv_exe and xvfb-run)
+
+# --- general ------------------------------------------------------------
+stage_mode : "symlink"   # symlink (saves disk) | copy -- how raw FASTQs are brought into out_dir
+min_mapq   : 20          # minimum mapping quality (low coverage, SV scan, short-read variant calling)
+
+# --- threads / memory per job ---------------------------------------------
+# Jobs share the salloc allocation: run.sh gives snakemake all its CPUs and
+# memory, and runs as many jobs at once as fit.
+align_threads   : 8
+align_mem_mb    : 16000
+medaka_threads  : 4
+medaka_mem_mb   : 8000
+fastp_threads   : 4
+
+# --- read filtering -------------------------------------------------------
+# ONT (filtlong)
+filter_mode          : "best95per"   # best95per | best95per_max100x | none
+filtlong_min_length  : 500
+filtlong_keep_percent: 95
+# short reads (fastp)
+fastp_min_length : 30
+fastp_min_qual   : 20     # trim 3' ends below this mean quality
+
+# --- variant calling ------------------------------------------------------
+simplify_min_qual  : 50    # ONT (medaka): minimum QUAL kept in <sample>.simple.tsv
+bcftools_min_qual  : 30    # short reads (bcftools): minimum QUAL
+bcftools_min_baseq : 20
+bcftools_max_depth : 10000
+
+# --- low-coverage regions -------------------------------------------------
+# a base is "low" if depth < max(lowcov_min_depth, lowcov_frac x median depth)
+lowcov_min_depth : 10
+lowcov_frac      : 0.25
+lowcov_min_len   : 20     # bp
+lowcov_merge_gap : 10     # merge low regions closer than this (bp)
+annotate_skip_types : "source,gene"   # GenBank feature types ignored when annotating
+
+# --- large indels / breakpoints (per read type) ---------------------------
+sv_scan:
+  short:
+    min_indel   : 10    # minimum CIGAR indel size (bp)
+    min_clip    : 20    # minimum soft-clip length for a breakpoint (bp)
+    min_support : 3     # minimum reads supporting an event
+    cluster_tol : 5     # position tolerance when clustering (bp)
+  ont:
+    min_indel   : 30
+    min_clip    : 200
+    min_support : 3
+    cluster_tol : 20
+sv_ignore_contig_ends : 10   # drop breakpoints this close to a contig end (reads crossing the
+                             # origin of a circular replicon); 0 keeps them (linear replicons)
+
+# --- multimer calling (ONT) -----------------------------------------------
+multimer_threads      : 4
+multimer_min_fraction : 0.02   # fraction of full-length reads that must be concatemeric
+multimer_min_reads    : 5
+multimer_junction_tol : 0.02   # junction slack, fraction of L (floor 50 bp)
+multimer_min_query_cov: 0.8
+multimer_length_cut   : 1.5    # read/L ratio above which a read is concatemeric
+multimer_extra_columns: false  # also add multimer_copies / multimer_pct to the annotated table
+
+# --- de novo assembly -----------------------------------------------------
+# Samples with several replicons (chromosome + plasmid) give several contigs:
+# see <sample>.assembly_info.txt.
+flye_read_mode   : "--nano-raw"  # --nano-raw | --nano-hq | --nano-corr (match your basecaller)
+flye_threads     : 8
+flye_mem_mb      : 16000
+flye_min_coverage: 10            # skip (clearly-labelled empty result) below this x reference length
+unicycler_threads: 8
+unicycler_mem_mb : 16000
+unicycler_mode   : "normal"      # conservative | normal | bold
+
+# --- plasmid panel screening ----------------------------------------------
+# One or more .fasta/.fa files, one per candidate plasmid (or several records
+# in one file). Every sample's reads are mapped against the whole panel;
+# per-plasmid coverage goes into <out_dir>/coverage_summary.tsv.
+plasmid_panel_dir     : ""
+plasmid_screen_threads: 4
+plasmid_screen_mem_mb : 4000
+
+# --- cassette hotspots (needs run_plasmid_screen) --------------------------
+# Exact FASTA record name of the cassette inside the plasmid panel, as shown by
+#   samtools idxstats <out_dir>/<sample>/<sample>.plasmid_panel.sorted.bam
+cassette_reference       : "Chlor_cassette"
+cassette_hotspot_max_gap : 1000
+cassette_hotspot_flank   : 500
+cassette_hotspot_min_reads: 2
+
+# IGV launcher (only for run_igv_snapshots), e.g. "/home/<you>/softwares/igv/igv.sh"
+igv_exe     : ""
+igv_heap_mb : 4000   # Java heap given to IGV
+igv_mem_mb  : 6000   # memory reserved for the IGV job (heap + overhead)
+
+# --- analysis scripts (optional) -------------------------------------------
+# Scripts are taken from <pipeline>/scripts. To try another version of a
+# script, put it there and name it here, e.g.  simplify: "simplify.5.py"
+script_dir : ""
+script: {}

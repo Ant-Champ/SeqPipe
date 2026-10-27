@@ -1,0 +1,33 @@
+# Test run on the bundled synthetic data (see make_test_data.py).
+# Used by `./run.sh test` (whole pipeline) and `./run.sh setup` (builds every
+# conda environment). Paths are relative to this folder.
+out_dir      : "results/"
+sample_sheet : "sample_sheet.tsv"
+ref_dir      : "data/ref/"
+fastq_dir    : "data/fastq/"
+fastq_base_name   : ""
+default_reference : "testref"
+
+run_read_filtering    : true
+run_variant_calling   : true
+run_gatc_annotation   : true
+run_coverage_analysis : true
+run_sv_scan           : true
+run_multimer_analysis : true
+run_denovo_assembly   : true
+run_plasmid_screen    : true
+run_cassette_hotspots : true
+run_igv_snapshots     : false
+
+plasmid_panel_dir  : "data/panel/"
+cassette_reference : "Chlor_cassette"
+
+# small data: small jobs
+align_threads  : 2
+align_mem_mb   : 2000
+medaka_threads : 2
+medaka_mem_mb  : 4000
+flye_threads   : 2
+flye_mem_mb    : 4000
+unicycler_threads: 2
+unicycler_mem_mb : 4000

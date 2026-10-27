@@ -1,0 +1,6 @@
+channels: [conda-forge, bioconda]
+dependencies:
+  - python>=3.10
+  - biopython
+  - pysam>=0.21
+  - samtools>=1.17

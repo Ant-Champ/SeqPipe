@@ -1,0 +1,3 @@
+# Pipeline runs on Linux: keep LF line endings in the repo and working copy
+* text=auto eol=lf
+*.gb -text

@@ -1,0 +1,9 @@
+# Driver environment: the one you activate before ./run.sh.
+# Every rule then builds its own environment from the other envs/*.yaml.
+name: seqpipe
+channels: [conda-forge, bioconda]
+dependencies:
+  - python=3.11
+  - snakemake-minimal>=8,<9
+  - pandas
+  - biopython
