@@ -1,0 +1,10 @@
+name: summary
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python >=3.8
+  - pandas
+  - numpy
+  - biopython

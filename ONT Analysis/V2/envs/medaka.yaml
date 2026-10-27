@@ -1,0 +1,4 @@
+name: nanoforge-medaka
+channels: [bioconda, conda-forge]
+dependencies:
+  - medaka

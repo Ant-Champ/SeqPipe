@@ -1,0 +1,5 @@
+name: nanoforge-qc
+channels: [bioconda, conda-forge]
+dependencies:
+  - python=3.10
+  - filtlong =0.2.1

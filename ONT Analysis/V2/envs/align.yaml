@@ -1,0 +1,5 @@
+name: nanoforge-align
+channels: [bioconda, conda-forge]
+dependencies:
+  - python=3.10
+  - samtools
