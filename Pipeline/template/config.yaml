@@ -56,7 +56,7 @@ fastp_min_length : 30
 fastp_min_qual   : 20     # trim 3' ends below this mean quality
 
 # --- variant calling ------------------------------------------------------
-simplify_min_qual  : 50    # ONT (medaka): minimum QUAL kept in <sample>.simple.tsv
+simplify_min_qual  : 50    # ONT (medaka): keep variants seen in MORE than this % of reads (despite the name, not a QUAL)
 bcftools_min_qual  : 30    # short reads (bcftools): minimum QUAL
 bcftools_min_baseq : 20
 bcftools_max_depth : 10000

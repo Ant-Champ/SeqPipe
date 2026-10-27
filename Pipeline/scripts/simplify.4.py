@@ -47,7 +47,7 @@ def main():
     parser = argparse.ArgumentParser(description='Simplify VCF file.')
     parser.add_argument('-in', dest='input_file', required=True, help='Input VCF file')
     parser.add_argument('-out', dest='output_file', required=True, help='Output simplified tsv file')
-    parser.add_argument('-min', dest='min_allele', help='minimum allelic frequency threshold %, default:0', default=0)
+    parser.add_argument('-min', dest='min_allele', help='minimum allelic frequency threshold %%, default:0', default=0)
     args = parser.parse_args()
 
     df = parse_vcf(args.input_file, args.min_allele)

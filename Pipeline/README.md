@@ -401,7 +401,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `filter_mode` | `best95per` | ONT: `best95per`, `best95per_max100x` (also caps at 100× the reference length) or `none` |
 | `filtlong_min_length`, `filtlong_keep_percent` | 500, 95 | ONT filtering |
 | `fastp_min_length`, `fastp_min_qual` | 30, 20 | short-read trimming |
-| `simplify_min_qual` | 50 | ONT variants: minimum medaka QUAL |
+| `simplify_min_qual` | 50 | ONT variants: keep those in more than this % of reads (despite the name, not a QUAL) |
 | `bcftools_min_qual` | 30 | SR variants: minimum QUAL |
 | `lowcov_min_depth`, `lowcov_frac` | 10, 0.25 | "low" = depth < max(min_depth, frac × median) |
 | `lowcov_min_len`, `lowcov_merge_gap` | 20, 10 | minimum region length; merge regions closer than this |
