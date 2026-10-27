@@ -1,8 +1,0 @@
-name: nanoforge-plasmids
-channels: [bioconda, conda-forge]
-dependencies:
-  - minimap2
-  - samtools
-  - python=3.10
-  - biopython
-  - pysam
