@@ -12,7 +12,7 @@ geneC, and two cassette insertions (Kan in geneB, Chlor in geneC).
 Writes (all small, committed to the repository):
   data/ref/testref.gb           GenBank reference (2 records)
   data/cassettes/*.gb           TEST_Kan_Cassette, TEST_Chlor_Cassette
-  data/panel/panel.fasta        plasmid panel: the strain's plasmid + an absent plasmid
+  data/panel/*.gb, *.fasta      plasmid panel: the strain's plasmid + an absent plasmid
   data/fastq/barcode01.fastq.gz ONT reads (~40x, 1 % errors)
   data/fastq/sr_R1/R2.fastq.gz  paired 75 bp short reads (~60x)
 Only the python standard library is used; output is deterministic (seed 1).
@@ -110,9 +110,11 @@ def main():
         fh.write(genbank("TEST_Kan_Cassette", kan, [(151, 1350, "kan", "kanamycin resistance")], circular=False))
     with open(HERE / "cassettes" / "TEST_Chlor_Cassette.gb", "w", newline="\n") as fh:
         fh.write(genbank("TEST_Chlor_Cassette", chlor, [(151, 1150, "cat", "chloramphenicol resistance")], circular=False))
-    # plasmid panel: the sample's plasmid (present) + one absent plasmid
-    with open(HERE / "panel" / "panel.fasta", "w", newline="\n") as fh:
-        fh.write(f">present_plasmid\n{plasmid}\n>absent_plasmid\n{absent}\n")
+    # plasmid panel: the sample's plasmid (present, GenBank) + one absent plasmid (FASTA)
+    with open(HERE / "panel" / "present_plasmid.gb", "w", newline="\n") as fh:
+        fh.write(genbank("present_plasmid", plasmid, feats_pl))
+    with open(HERE / "panel" / "absent_plasmid.fasta", "w", newline="\n") as fh:
+        fh.write(f">absent_plasmid\n{absent}\n")
 
     # ONT reads: lengths 1-6 kb, ~40x per copy, 1 % errors, both strands
     with gzip.open(HERE / "fastq" / "barcode01.fastq.gz", "wt") as fh:

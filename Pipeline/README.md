@@ -500,7 +500,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `flye_read_mode` | `--nano-raw` | `--nano-hq` for recent (R10, SUP) basecalls |
 | `flye_min_coverage` | 10 | skip assembly below this × reference length (clearly labelled, does not fail) |
 | `unicycler_mode` | `normal` | `conservative` / `normal` / `bold` |
-| `plasmid_panel_dir` | — | folder with the panel `.fasta` files |
+| `plasmid_panel_dir` | — | folder with the panel plasmids: `.gb/.gbk/.genbank/.fasta/.fa/.fna`, one plasmid per file (named after the file) or several records per file (`file_recordid`). Use an absolute path: a relative one is read from the config's folder. Checked at start-up |
 | `cassette_dir` | — | folder with one `.gb`/`.fasta` per cassette. All of them are searched |
 | `cassette_min_mapq` | 20 | evidence below this mapping quality cannot name the cassette |
 | `cassette_min_reads` | 2 | minimum reads for a junction |

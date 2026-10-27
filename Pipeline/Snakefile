@@ -84,21 +84,17 @@ if "run_cassette_hotspots" in config:
           "are now found by run_cassette_search with the cassettes of cassette_dir (see README).",
           file=sys.stderr)
 
-# Directory of candidate plasmid fasta(s) for the panel-screening branch --
-# the same panel is checked against every sample (see rules/plasmid_screen.smk).
-PLASMID_PANEL_DIR = os.path.join(config["plasmid_panel_dir"], "") if config.get("plasmid_panel_dir") else ""
-
-if RUN_PLASMID_SCREEN and not PLASMID_PANEL_DIR:
-    raise WorkflowError(
-        "run_plasmid_screen is true but plasmid_panel_dir is not set in config.yaml."
-    )
 if RUN_IGV and not config.get("igv_exe"):
     raise WorkflowError("run_igv_snapshots is true but igv_exe is not set in config.yaml.")
 
 
-def _find_cassettes(folder):
-    """Every cassette in cassette_dir: one per GenBank/FASTA file, named after
-    the file (file_recordid if a file holds several records)."""
+SEQ_EXTENSIONS = ".gb/.gbk/.genbank/.fasta/.fa/.fna"
+
+
+def _find_sequences(folder):
+    """Every sequence of a folder (cassette_dir, plasmid_panel_dir): one per
+    GenBank/FASTA file, named after the file (file_recordid if a file holds
+    several records)."""
     from Bio import SeqIO
     found = []
     for path in sorted(glob.glob(os.path.join(folder, "*"))):
@@ -112,17 +108,31 @@ def _find_cassettes(folder):
         for i, rec in enumerate(recs):
             name = stem if len(recs) == 1 else f"{stem}_{rec.id}"
             found.append({"name": re.sub(r"[^\w.-]", "_", name), "path": path, "format": fmt, "index": i})
+    dups = sorted({s["name"] for s in found if [t["name"] for t in found].count(s["name"]) > 1})
+    if dups:
+        raise WorkflowError(f"same sequence name from several files in {folder}: {dups} -- rename the files")
     return found
 
 
-CASSETTE_DIR = config.get("cassette_dir", "")
-CASSETTES = []
-if RUN_CASSETTES:
-    if not CASSETTE_DIR or not os.path.isdir(CASSETTE_DIR):
-        raise WorkflowError(f"run_cassette_search is true but cassette_dir is not a folder: '{CASSETTE_DIR}'")
-    CASSETTES = _find_cassettes(CASSETTE_DIR)
-    if not CASSETTES:
-        raise WorkflowError(f"no .gb/.gbk/.fasta/.fa files in cassette_dir ({CASSETTE_DIR})")
+def _load_sequence_dir(key, enabled):
+    """Sequences of the folder config[key]; crash now (not mid-run) if it is unusable."""
+    folder = config.get(key, "")
+    if not enabled:
+        return []
+    if not folder or not os.path.isdir(folder):
+        raise WorkflowError(
+            f"{key} is not a folder: '{folder}' (relative paths are read from the "
+            f"config's folder, {os.getcwd()}; an absolute path is safer)")
+    seqs = _find_sequences(folder)
+    if not seqs:
+        raise WorkflowError(f"no {SEQ_EXTENSIONS} files in {key} ({folder})")
+    return seqs
+
+
+# Cassettes searched in every sample (rules/cassettes.smk), and the plasmid
+# panel checked against every sample (rules/plasmid_screen.smk).
+CASSETTES     = _load_sequence_dir("cassette_dir", RUN_CASSETTES)
+PLASMID_PANEL = _load_sequence_dir("plasmid_panel_dir", RUN_PLASMID_SCREEN)
 
 
 # ----------------------------------------------------------------------

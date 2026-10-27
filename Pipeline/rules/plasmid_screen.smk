@@ -2,42 +2,29 @@
 # rules/plasmid_screen.smk :: plasmid-panel presence/coverage screening
 # (ONT and short reads)
 #
-# Every filtered read set is aligned to the combined plasmid panel
+# Every sequence of plasmid_panel_dir (.gb/.gbk/.genbank/.fasta/.fa/.fna)
+# goes into one panel. Every filtered read set is aligned to that panel
 # (minimap2 map-ont for ONT, sr for paired short reads); samtools coverage
 # gives breadth/depth per panel plasmid -> plasmid_coverage_summary.tsv.
 # (Cassette locations in the genome: see rules/cassettes.smk.)
 # ======================================================================
 
 rule build_plasmid_panel:
-    """Concatenate every fasta in plasmid_panel_dir into one combined reference."""
+    """All GenBank/FASTA sequences of plasmid_panel_dir -> one FASTA
+    (record names = file names, as for the cassettes)."""
+    input:
+        sorted({p["path"] for p in PLASMID_PANEL}),
     output:
         panel = OUT_DIR + "plasmid_panel/combined_panel.fasta",
     log:
         OUT_DIR + "logs/build_plasmid_panel.log",
-    params:
-        panel_dir = PLASMID_PANEL_DIR,
     run:
-        import glob
-        import os
-
-        files = sorted(
-            glob.glob(os.path.join(params.panel_dir, "*.fasta"))
-            + glob.glob(os.path.join(params.panel_dir, "*.fa"))
-        )
-
-        if not files:
-            raise WorkflowError(
-                f"no .fasta/.fa files found in plasmid_panel_dir ({params.panel_dir})"
-            )
-
-        os.makedirs(os.path.dirname(output.panel), exist_ok=True)
-
+        from Bio import SeqIO
         with open(output.panel, "w") as out_fh, open(log[0], "w") as log_fh:
-            log_fh.write("plasmid panel built from:\n")
-            for f in files:
-                log_fh.write(f"  {f}\n")
-                with open(f) as in_fh:
-                    out_fh.write(in_fh.read())
+            for p in PLASMID_PANEL:
+                rec = list(SeqIO.parse(p["path"], p["format"]))[p["index"]]
+                out_fh.write(f">{p['name']}\n{str(rec.seq).upper()}\n")
+                log_fh.write(f"{p['name']}\t{len(rec.seq)} bp\t{p['path']}\n")
 
 
 rule plasmid_screen_align:

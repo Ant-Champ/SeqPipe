@@ -98,8 +98,10 @@ unicycler_mem_mb : 16000
 unicycler_mode   : "normal"      # conservative | normal | bold
 
 # --- plasmid panel screening ----------------------------------------------
-# One or more .fasta/.fa files, one per candidate plasmid (or several records
-# in one file). Every sample's reads are mapped against the whole panel;
+# Folder of GenBank or FASTA files (.gb/.gbk/.genbank/.fasta/.fa/.fna), one
+# per candidate plasmid, named after the file (file_recordid if a file holds
+# several records). Use an ABSOLUTE path: a relative one is read from this
+# config's folder. Every sample's reads are mapped against the whole panel;
 # per-plasmid coverage goes into <out_dir>/coverage_summary.tsv.
 plasmid_panel_dir     : ""
 plasmid_screen_threads: 4
