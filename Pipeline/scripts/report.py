@@ -405,6 +405,8 @@ pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;paddi
 .plot .bar b{color:var(--ink)}
 .plot .bar button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:5px;padding:1px 8px;cursor:pointer}
 .plot canvas{width:100%;display:block;cursor:crosshair}
+.hotlist{font-size:12px;color:var(--muted);padding:2px 0 4px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.hotlist b{color:var(--cas)} .hotlist a{cursor:pointer;color:var(--cas)}
 .tip{position:fixed;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;
  padding:6px 8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.15);display:none;z-index:9;max-width:360px}
 .gallery{display:grid;grid-template-columns:1fr;gap:12px}
@@ -549,6 +551,9 @@ function plot(sample, contig, cassette = false) {
   const box = $("div", { class: "plot" },
     $("div", { class: "bar" }, $("b", {}, contig), `${fmtBp(dp.len)} · median depth ${median}× · bin ${dp.bin} bp`,
       $("span", { style: "margin-left:auto" }, pos), out, reset), cv);
+  const hot = ev.filter(e => e[0] === "hotspot");
+  if (hot.length) box.append($("div", { class: "hotlist" }, $("b", {}, `Cassette hotspots (${hot.length}): `),
+    hot.map(e => $("a", { onclick: () => api.show(e[2], e[3]) }, `${e[4].split(" ")[0]} @ ${e[2].toLocaleString()}`))));
   const H = TRACK.depth + TRACK.ev + TRACK.gene + TRACK.axis;
   let W = 800, drag = null;
   function zoom(c, w) { w = Math.max(w, Math.min(200, dp.len)); st.a = Math.max(1, Math.round(c - w / 2)); st.b = Math.min(dp.len, Math.round(st.a + w)); draw(); }
@@ -581,11 +586,28 @@ function plot(sample, contig, cassette = false) {
       if (e[3] < st.a || e[2] > st.b) continue;
       const x0 = X(e[2]), x1 = Math.max(x0 + 2, X(e[3] + 1));
       g.fillStyle = css(EVCOL[e[0]]);
+      if (e[0] === "hotspot") continue;            // drawn on top, below
       if (e[0] === "variant") { g.fillRect(x0 - 0.5, y0, 2, 8); }
       else if (e[0] === "breakpoint") { g.globalAlpha = .8; g.fillRect(x0 - 1, 0, 2, TRACK.depth); g.globalAlpha = 1; g.fillRect(x0 - 2, y0, 4, TRACK.ev - 6); }
       else if (e[0] === "lowcov" || e[0] === "highcov") { g.fillRect(x0, y0 + 9, x1 - x0, 4); }
       else { g.fillRect(x0, y0, x1 - x0, TRACK.ev - 6);
         if (e[0] === "cassette" && x1 - x0 > 60) { g.fillStyle = "#fff"; g.font = "10px system-ui"; g.fillText(e[4], x0 + 3, y0 + 9, x1 - x0 - 6); } }
+    }
+    // cassette hotspots: a line through the depth, a marker and the cassette name
+    let lastLabel = -1e9;
+    g.font = "bold 10px system-ui";
+    for (const e of ev) {
+      if (e[0] !== "hotspot" || e[3] < st.a || e[2] > st.b) continue;
+      const xm = (X(e[2]) + X(e[3] + 1)) / 2;
+      g.fillStyle = css("--cas"); g.globalAlpha = .9; g.fillRect(xm - 1, 12, 2, TRACK.depth - 12); g.globalAlpha = 1;
+      g.beginPath(); g.moveTo(xm - 6, y0); g.lineTo(xm + 6, y0); g.lineTo(xm, y0 + TRACK.ev - 4); g.closePath(); g.fill();
+      const label = e[4].split(" ")[0];
+      if (xm - lastLabel > g.measureText(label).width + 8) {
+        const tx = Math.min(Math.max(2, xm + 4), W - g.measureText(label).width - 2);
+        g.fillStyle = css("--panel"); g.fillRect(tx - 2, 1, g.measureText(label).width + 4, 12);
+        g.fillStyle = css("--cas"); g.fillText(label, tx, 10);
+        lastLabel = xm;
+      }
     }
     // genes
     const gy = TRACK.depth + TRACK.ev + 4, span = st.b - st.a;
