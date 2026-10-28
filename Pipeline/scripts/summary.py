@@ -22,7 +22,7 @@ import sys
 NA, ERR = "NA", "ERR"
 
 COLUMNS = [
-    "sample_name", "platform", "reference",
+    "sample_name", "platform", "reference", "status",
     "raw_reads", "raw_bases", "filt_reads", "filt_bases", "filt_N50",
     "ref_length", "ref_records", "coverage_approx",
     "pct_mapped", "mean_depth", "min_replicon_breadth",
@@ -73,6 +73,15 @@ def read_stats(path, raw_names, filt_names, is_ont):
     if is_ont:
         res["filt_N50"] = to_int(filt[0]["N50"])
     return res
+
+
+def depth_check(path):
+    """depth_check.tsv -> (status, theoretical depth, minimum); None if the check is off."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, newline="") as fh:
+        r = next(csv.DictReader(fh, delimiter="\t"))
+    return r["status"], r["theoretical_depth"], r["min_theoretical_depth"]
 
 
 def fasta_stats(path):
@@ -212,6 +221,14 @@ def summarize_sample(s, out_dir, tg):
             rec["coverage_approx"] = ERR
         else:
             rec["coverage_approx"] = "%.1f" % (st["filt_bases"] / fa[0])
+
+    # depth check: a low-diversity sample is not analysed further -------
+    dc = try_(name, "depth_check", lambda: depth_check(
+        os.path.join(d, "qc", name + ".depth_check.tsv")), default=None)
+    rec["status"] = "ok"
+    if dc and dc[0] != "ok":
+        rec["status"] = "%s (%sx < %sx)" % dc
+        return rec
 
     # alignment ----------------------------------------------------------
     rec["pct_mapped"] = try_(name, "flagstat", lambda: flagstat_pct_mapped(base + ".flagstat.txt"))

@@ -73,9 +73,9 @@ rule plasmid_screen_coverage:
 rule aggregate_plasmid_coverage:
     """Run-level long-format table: one row per sample x plasmid."""
     input:
-        tsvs = expand(
+        tsvs = lambda wc: expand(
             OUT_DIR + "{sample}/{sample}.plasmid_coverage.tsv",
-            sample=SAMPLE_NAMES
+            sample=ok_samples()
         ),
     output:
         summary = OUT_DIR + "plasmid_coverage_summary.tsv",
@@ -83,7 +83,7 @@ rule aggregate_plasmid_coverage:
         OUT_DIR + "logs/aggregate_plasmid_coverage.log",
     params:
         exe = script_path("coverage_summary", "aggregate_coverage.1.py"),
-        samples = SAMPLE_NAMES,
+        samples = lambda wc: ok_samples(),
     conda:
         "../envs/python.yaml"
     shell:

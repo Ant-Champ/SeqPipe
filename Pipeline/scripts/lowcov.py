@@ -4,9 +4,16 @@
 Ported from alignqc.py (step_lowcov). Depth comes from `samtools depth -aa -Q
 <min-mapq>` (every position, including zeros and reference contigs with no
 reads) and is held in memory at 4 bytes/base: fine for bacteria/plasmids/phage.
-A base is "low" if depth < max(low_depth, low_frac * median depth); low bases
-closer than --low-merge-gap are merged and regions shorter than --low-min-len
-are dropped.
+A base is "low" if its depth, averaged over --low-smooth bp around it, is below
+max(low_depth, low_frac * median depth), capped at --low-max-thr-frac * median
+(so an absolute floor close to the median cannot turn ordinary Poisson dips of
+a low-depth sample into low regions). Low bases closer than --low-merge-gap
+(not counting masked bases) are merged; regions shorter than --low-min-len, or
+whose mean depth is above --low-region-max-frac * median, are dropped (a real
+deletion is ~0x over its whole length; a cluster of dips is not).
+
+--mask (BED, e.g. the unmappable regions of mappability.py): masked bases are
+never low and are left out of the median; a low region can run across them.
 
 High coverage (duplications, amplifications): the replicon is cut into
 --high-window bp windows; a window is "high" if its mean depth is above
@@ -18,9 +25,10 @@ dropped. fold = region mean / replicon median (~2 for one extra copy).
 Coordinates are 0-based half-open (BED-like).
 
 --out-summary columns ('#' header line):
-  #contig  length  mean_depth  median_depth  pct_zero  pct_low
+  #contig  length  mean_depth  median_depth  pct_zero  pct_low  pct_masked
 --out-low columns ('#' header line):
-  #contig  start  end  length  mean_depth  min_depth
+  #contig  start  end  length  mean_depth  min_depth  masked_bp  rel_depth
+  (mean_depth / min_depth over the unmasked bases; rel_depth = mean / median)
 --out-high columns ('#' header line):
   #contig  start  end  length  mean_depth  replicon_median  fold
 
@@ -63,18 +71,70 @@ def _median_from_hist(hist, n):
             return k
 
 
-def low_regions(arr, thr, merge_gap, min_len):
-    """Merged low-depth regions of one contig -> [(start, end, mean, min)]."""
-    regions = []                                # [start, end, sum, n, min]
+def smooth(arr, window):
+    """Centered rolling mean of arr over `window` bp (window <= 1: arr itself)."""
+    if window <= 1:
+        return arr
+    n, h = len(arr), window // 2
+    pre = array("q", [0]) * (n + 1)
+    run = 0
     for i, d in enumerate(arr):
-        if d >= thr:
+        run += d
+        pre[i + 1] = run
+    out = array("f", bytes(4 * n))
+    for i in range(n):
+        a, b = max(0, i - h), min(n, i + h + 1)
+        out[i] = (pre[b] - pre[a]) / (b - a)
+    return out
+
+
+def low_regions(arr, sm, mask, thr, merge_gap, min_len):
+    """Merged low-depth regions of one contig -> [(start, end, mean, min, masked_bp)].
+    sm = smoothed depth (decides "low"), arr = raw depth (mean/min reported),
+    mask = bytearray (1 = masked) or None. Gaps are counted in unmasked bases."""
+    regions = []                                # [start, end, sum, n, min]
+    gap = None                                  # unmasked non-low bases since the last low base
+    for i in range(len(arr)):
+        if mask is not None and mask[i]:
             continue
-        if regions and i - regions[-1][1] <= merge_gap:
+        if sm[i] >= thr:
+            if gap is not None:
+                gap += 1
+            continue
+        d = arr[i]
+        if regions and gap is not None and gap <= merge_gap:
             r = regions[-1]
             r[1], r[2], r[3], r[4] = i + 1, r[2] + d, r[3] + 1, min(r[4], d)
         else:
             regions.append([i, i + 1, d, 1, d])
-    return [(s, e, tot / n, mn) for s, e, tot, n, mn in regions if e - s >= min_len]
+        gap = 0
+    out = []
+    for s, e, tot, n, mn in regions:
+        if e - s < min_len:
+            continue
+        masked = sum(mask[s:e]) if mask is not None else 0
+        # mean / min over the unmasked bases of the whole region (gaps included)
+        vals = [arr[j] for j in range(s, e) if mask is None or not mask[j]]
+        out.append((s, e, sum(vals) / len(vals), min(vals), masked))
+    return out
+
+
+def read_mask(path, lengths):
+    """BED -> {contig: bytearray (1 = masked)}."""
+    mask = {}
+    if not path:
+        return mask
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            c, s, e = line.split("\t")[:3]
+            if c not in lengths:
+                continue
+            m = mask.setdefault(c, bytearray(lengths[c]))
+            s, e = max(0, int(s)), min(lengths[c], int(e))
+            m[s:e] = b"\x01" * (e - s)
+    return mask
 
 
 def high_regions(arr, median, frac, window, merge_gap, min_len):
@@ -116,13 +176,27 @@ def run(args):
     if proc.wait() != 0 or not depth:
         sys.exit("lowcov: samtools depth failed or returned nothing")
 
+    mask = read_mask(args.mask, {c: len(a) for c, a in depth.items()})
+    if args.mask:
+        n_masked = sum(sum(m) for m in mask.values())
+        print(f"mask {args.mask}: {n_masked:,} bp ignored ({100 * n_masked / max(genome_len, 1):.2f}%)")
+
     hist = Counter()
-    for arr in depth.values():
-        hist.update(arr)
-    median = _median_from_hist(hist, sum(hist.values()))
-    # A base is "low" if depth < max(low_depth, low_frac * median depth)
+    for c, arr in depth.items():
+        m = mask.get(c)
+        hist.update(arr if m is None else (d for d, x in zip(arr, m) if not x))
+    median = _median_from_hist(hist, sum(hist.values())) or 0
+    # A base is "low" if its (smoothed) depth < max(low_depth, low_frac * median),
+    # never above low_max_thr_frac * median
     thr = max(args.low_depth, args.low_frac * median)
-    print(f"median depth={median}  low-coverage threshold=<{thr:.1f}")
+    cap = args.low_max_thr_frac * median
+    if thr > cap:
+        print(f"WARNING: low-coverage threshold {thr:.1f} is above {args.low_max_thr_frac} x median "
+              f"({median}): capped at {cap:.1f}")
+        thr = cap
+    region_max = args.low_region_max_frac * median
+    print(f"median depth={median}  low-coverage threshold=<{thr:.1f} (smoothed over {args.low_smooth} bp)  "
+          f"region mean must be <={region_max:.1f}")
 
     for p in (args.out_summary, args.out_low, args.out_high):
         Path(p).parent.mkdir(parents=True, exist_ok=True)
@@ -130,20 +204,29 @@ def run(args):
     # ---- summary table
     contig_median = {}
     with open(args.out_summary, "w") as out:
-        out.write("#contig\tlength\tmean_depth\tmedian_depth\tpct_zero\tpct_low\n")
+        out.write("#contig\tlength\tmean_depth\tmedian_depth\tpct_zero\tpct_low\tpct_masked\n")
         for contig, arr in depth.items():
             n, h = len(arr), Counter(arr)
             low = sum(v for k, v in h.items() if k < thr)
             contig_median[contig] = _median_from_hist(h, n)
+            masked = sum(mask[contig]) if contig in mask else 0
             out.write(f"{contig}\t{n}\t{sum(arr)/n:.1f}\t{contig_median[contig]}\t"
-                      f"{100*h[0]/n:.2f}\t{100*low/n:.2f}\n")
+                      f"{100*h[0]/n:.2f}\t{100*low/n:.2f}\t{100*masked/n:.2f}\n")
 
     # ---- pass 2: low regions, merging gaps <= low_merge_gap
     with open(args.out_low, "w") as out:
-        out.write("#contig\tstart\tend\tlength\tmean_depth\tmin_depth\n")
+        out.write("#contig\tstart\tend\tlength\tmean_depth\tmin_depth\tmasked_bp\trel_depth\n")
+        dropped = 0
         for contig, arr in depth.items():
-            for start, end, mean, mn in low_regions(arr, thr, args.low_merge_gap, args.low_min_len):
-                out.write(f"{contig}\t{start}\t{end}\t{end-start}\t{mean:.1f}\t{mn}\n")
+            sm = smooth(arr, args.low_smooth)
+            for start, end, mean, mn, masked in low_regions(arr, sm, mask.get(contig), thr,
+                                                            args.low_merge_gap, args.low_min_len):
+                if mean > region_max:
+                    dropped += 1
+                    continue
+                rel = mean / median if median else 0
+                out.write(f"{contig}\t{start}\t{end}\t{end-start}\t{mean:.1f}\t{mn}\t{masked}\t{rel:.2f}\n")
+        print(f"{dropped} candidate low region(s) dropped: mean depth above {region_max:.1f}")
     print(f"-> {args.out_low}")
 
     # ---- pass 3: high regions, against each replicon's own median
@@ -174,6 +257,14 @@ def main():
                     help="minimum low-coverage region length (bp) [20]")
     ap.add_argument("--low-merge-gap", type=int, default=10,
                     help="merge low regions closer than this (bp) [10]")
+    ap.add_argument("--low-smooth", type=int, default=50,
+                    help="average the depth over this many bp before calling 'low' (1 = off) [50]")
+    ap.add_argument("--low-max-thr-frac", type=float, default=0.5,
+                    help="the low threshold never exceeds this x the median depth [0.5]")
+    ap.add_argument("--low-region-max-frac", type=float, default=0.25,
+                    help="drop a low region whose mean depth is above this x the median [0.25]")
+    ap.add_argument("--mask", default=None,
+                    help="BED of bases to ignore (e.g. unmappable regions) [none]")
     ap.add_argument("--high-frac", type=float, default=1.7,
                     help="window is 'high' above this x the replicon median depth [1.7]")
     ap.add_argument("--high-window", type=int, default=100,

@@ -6,37 +6,42 @@
 # files, never the FASTQs (read_stats holds the seqkit numbers).
 # ======================================================================
 
-def _run_summary_inputs():
+def _run_summary_inputs(wildcards=None):
+    """Read stats / depth check of every sample; the rest only for the samples
+    that passed the depth check (low-diversity samples are not analysed)."""
+    OK = ok_samples()
+    ONT_OK = [s for s in OK if s in ONT_SAMPLES]
     d = {
-        "read_stats": expand(OUT_DIR + "{sample}/qc/{sample}.read_stats.tsv", sample=SAMPLE_NAMES),
-        "flagstats":  expand(OUT_DIR + "{sample}/{sample}.flagstat.txt", sample=SAMPLE_NAMES),
-        "ref_cov":    expand(OUT_DIR + "{sample}/{sample}.ref_coverage.tsv", sample=SAMPLE_NAMES),
-        "ref_fastas": expand(OUT_DIR + "{sample}/{sample}.ref.fasta", sample=SAMPLE_NAMES),
+        "read_stats":   expand(OUT_DIR + "{sample}/qc/{sample}.read_stats.tsv", sample=SAMPLE_NAMES),
+        "depth_checks": depth_checks(),
+        "ref_fastas":   expand(OUT_DIR + "{sample}/{sample}.ref.fasta", sample=SAMPLE_NAMES),
+        "flagstats":    expand(OUT_DIR + "{sample}/{sample}.flagstat.txt", sample=OK),
+        "ref_cov":      expand(OUT_DIR + "{sample}/{sample}.ref_coverage.tsv", sample=OK),
     }
     if RUN_VARIANTS:
-        d["align_snps"] = expand(OUT_DIR + "{sample}/{sample}.simple.tsv", sample=SAMPLE_NAMES)
+        d["align_snps"] = expand(OUT_DIR + "{sample}/{sample}.simple.tsv", sample=OK)
     if RUN_GATC:
-        d["annotated_gatc_align_snps"] = expand(OUT_DIR + "{sample}/{sample}.annotated.gatc.simple.tsv", sample=SAMPLE_NAMES)
+        d["annotated_gatc_align_snps"] = expand(OUT_DIR + "{sample}/{sample}.annotated.gatc.simple.tsv", sample=OK)
     if RUN_COVERAGE:
         d["coverage_regions"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{level}_coverage.annotated.tsv",
-                                       sample=SAMPLE_NAMES, level=["low", "high"])
+                                       sample=OK, level=["low", "high"])
     if RUN_SV:
         d["sv"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{table}.annotated.tsv",
-                         sample=SAMPLE_NAMES, table=["indels", "breakpoints"])
+                         sample=OK, table=["indels", "breakpoints"])
     if RUN_MULTIMER and ONT_SAMPLES:
-        d["multimer"] = expand(OUT_DIR + "{sample}/{sample}.multimer.summary.tsv", sample=ONT_SAMPLES)
+        d["multimer"] = expand(OUT_DIR + "{sample}/{sample}.multimer.summary.tsv", sample=ONT_OK)
     if RUN_DENOVO:
-        d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=SAMPLE_NAMES)
+        d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=OK)
     if RUN_CASSETTES:
         d["cassette_insertions"] = expand(
-            OUT_DIR + "{sample}/annotated/{sample}.cassette_insertions.annotated.tsv", sample=SAMPLE_NAMES
+            OUT_DIR + "{sample}/annotated/{sample}.cassette_insertions.annotated.tsv", sample=OK
         )
     return d
 
 
 rule run_summary:
     input:
-        **_run_summary_inputs()
+        unpack(_run_summary_inputs)
     output:
         summary = OUT_DIR + "summary.tsv",
     log:

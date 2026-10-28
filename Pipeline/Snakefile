@@ -258,36 +258,40 @@ if RUN_REPORT:
 # ----------------------------------------------------------------------
 # Target rule
 # ----------------------------------------------------------------------
-def _rule_all_inputs():
-    """Build rule-all targets from the RUN_* toggles above."""
+def _rule_all_inputs(wildcards=None):
+    """Build rule-all targets from the RUN_* toggles above. Per-sample targets
+    only for the samples that passed the depth check (ok_samples)."""
+    OK = ok_samples()
+    ONT_OK = [s for s in OK if s in ONT_SAMPLES]
     d = {
-        "sorted_bams": expand(OUT_DIR + "{sample}/{sample}.sorted.bam", sample=SAMPLE_NAMES),
-        "flagstats":   expand(OUT_DIR + "{sample}/{sample}.flagstat.txt", sample=SAMPLE_NAMES),
+        "depth_checks": depth_checks(),
+        "sorted_bams": expand(OUT_DIR + "{sample}/{sample}.sorted.bam", sample=OK),
+        "flagstats":   expand(OUT_DIR + "{sample}/{sample}.flagstat.txt", sample=OK),
         "run_summary": OUT_DIR + "summary.tsv",
     }
     if RUN_VARIANTS:
-        d["align_snps"] = expand(OUT_DIR + "{sample}/{sample}.simple.tsv", sample=SAMPLE_NAMES)
+        d["align_snps"] = expand(OUT_DIR + "{sample}/{sample}.simple.tsv", sample=OK)
     if RUN_GATC:
-        d["annotated_gatc_align_snps"] = expand(OUT_DIR + "{sample}/{sample}.annotated.gatc.simple.tsv", sample=SAMPLE_NAMES)
+        d["annotated_gatc_align_snps"] = expand(OUT_DIR + "{sample}/{sample}.annotated.gatc.simple.tsv", sample=OK)
     if RUN_COVERAGE:
         d["coverage_regions"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{level}_coverage.annotated.tsv",
-                                       sample=SAMPLE_NAMES, level=["low", "high"])
+                                       sample=OK, level=["low", "high"])
     if RUN_SV:
         d["sv"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{table}.annotated.tsv",
-                         sample=SAMPLE_NAMES, table=["indels", "breakpoints"])
+                         sample=OK, table=["indels", "breakpoints"])
     if RUN_MULTIMER and ONT_SAMPLES:
-        d["multimer_logs"] = expand(OUT_DIR + "{sample}/{sample}.multimer.log", sample=ONT_SAMPLES)
+        d["multimer_logs"] = expand(OUT_DIR + "{sample}/{sample}.multimer.log", sample=ONT_OK)
     if RUN_DENOVO:
-        d["assemblies"]     = expand(OUT_DIR + "{sample}/{sample}.assembly.fasta", sample=SAMPLE_NAMES)
-        d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=SAMPLE_NAMES)
+        d["assemblies"]     = expand(OUT_DIR + "{sample}/{sample}.assembly.fasta", sample=OK)
+        d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=OK)
     if RUN_CASSETTES:
         d["cassette_tables"] = expand(
             OUT_DIR + "{sample}/annotated/{sample}.cassette_{table}.annotated.tsv",
-            sample=SAMPLE_NAMES, table=["insertions", "junctions"]
+            sample=OK, table=["insertions", "junctions"]
         )
-        d["cassette_counts"] = expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=SAMPLE_NAMES)
+        d["cassette_counts"] = expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK)
     if RUN_IGV:
-        d["cassette_igv_snapshots"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=SAMPLE_NAMES)
+        d["cassette_igv_snapshots"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=OK)
     if RUN_COVERAGE or RUN_PLASMID_SCREEN:
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"
     if RUN_REPORT:
@@ -297,7 +301,7 @@ def _rule_all_inputs():
 
 rule all:
     input:
-        **_rule_all_inputs()
+        unpack(_rule_all_inputs)
 
 
 # ----------------------------------------------------------------------

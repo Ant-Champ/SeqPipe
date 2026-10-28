@@ -187,6 +187,21 @@ def gather_sample(s, out_dir, tg, embed_igv):
     if os.path.isfile(fastp):
         add("qc", "fastp", links=[[rel(fastp), "fastp report (filtering, quality, adapters)"]])
 
+    # depth check: a low-diversity sample has nothing more to show
+    dc = read_table(os.path.join(d, "qc", name + ".depth_check.tsv"))
+    low_div = None
+    if dc and dc["rows"] and dc["rows"][0][-1] != "ok":
+        r = dict(zip(dc["columns"], dc["rows"][0]))
+        low_div = (f"Low diversity: {int(r['filt_bases']):,} filtered bases for a {int(r['ref_length']):,} bp "
+                   f"reference = {r['theoretical_depth']}x theoretical depth, below min_theoretical_depth "
+                   f"({r['min_theoretical_depth']}x). The sample was not aligned or analysed.")
+        add("qc", "Depth check", table=dc)
+        return {
+            "platform": s["platform"], "reference": s["reference"],
+            "reads": [x for x in (s.get("reads1"), s.get("reads2")) if x],
+            "blocks": blocks, "events": [], "depth": {}, "low_diversity": low_div,
+        }
+
     # alignment & coverage (the plot is drawn from depth / genes / events)
     add("coverage", "Coverage per replicon (samtools coverage)", table=read_table(base + ".ref_coverage.tsv"))
     add("coverage", "Alignment flags (samtools flagstat)", text=read_text(base + ".flagstat.txt"))
@@ -226,6 +241,8 @@ def gather_sample(s, out_dir, tg, embed_igv):
             add("cassettes", "IGV snapshots", note="No insertion site, so no snapshot.")
         elif tg.get("igv"):
             add("cassettes", "IGV snapshots", note="No snapshot found in " + rel(igv_dir))
+        else:
+            add("cassettes", "IGV snapshots", note="IGV snapshots are off (set run_igv_snapshots: true).")
     if tg.get("plasmid_panel"):
         add("plasmids", "Plasmid panel coverage (samtools coverage)",
             table=read_table(base + ".plasmid_coverage.tsv"))
@@ -342,6 +359,9 @@ tr.go{cursor:pointer} tr.go:hover td{background:var(--chip)}
 .tools{display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--muted);font-size:12px}
 .tools input{padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink)}
 .note{color:var(--muted);font-style:italic}
+.banner{background:var(--bad);color:#fff;border-radius:8px;padding:10px 14px;margin:10px 0;font-weight:600}
+nav a .lowdiv{color:var(--bad);font-weight:600}
+nav a.on .lowdiv{color:#fff}
 pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;overflow:auto;font-size:12px}
 .chip{display:inline-block;padding:1px 7px;border-radius:10px;background:var(--chip);font-size:11px;margin-right:4px}
 .plot{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px 4px;margin:8px 0}
@@ -599,7 +619,7 @@ function tiles(s) {
   const T = [["Platform", smp.platform], ["Reference", smp.reference], ["Filtered reads", big(r.filt_reads)],
     ["Approx. coverage", r.coverage_approx && r.coverage_approx !== "NA" ? r.coverage_approx + "×" : "–"],
     ["Mapped", r.pct_mapped && r.pct_mapped !== "NA" ? r.pct_mapped + " %" : "–"], ["Mean depth", big(r.mean_depth)],
-    ["Min replicon breadth", r.min_replicon_breadth ? r.min_replicon_breadth + " %" : "–"],
+    ["Min replicon breadth", r.min_replicon_breadth && r.min_replicon_breadth !== "NA" ? r.min_replicon_breadth + " %" : "–"],
     ["Variants", big(r.detected_mutations)], ["Low-coverage regions", big(r.low_cov_regions)],
     ["High-coverage regions", big(r.high_cov_regions)],
     ["Large indels", big(r.large_indels)], ["Breakpoints", big(r.breakpoints)], ["Cassette sites", big(cas)],
@@ -609,9 +629,12 @@ function tiles(s) {
 }
 
 function sampleView(s) {
-  const smp = D.samples[s], out = [$("h2", {}, s), $("p", { class: "desc" }, `${smp.platform} · reference ${smp.reference} · reads: ${smp.reads.join(", ")}`), tiles(s)];
+  const smp = D.samples[s], out = [$("h2", {}, s), $("p", { class: "desc" }, `${smp.platform} · reference ${smp.reference} · reads: ${smp.reads.join(", ")}`)];
+  if (smp.low_diversity) out.push($("div", { class: "banner" }, "⚠ " + smp.low_diversity));
+  out.push(tiles(s));
   for (const sec of D.sections) {
     if (sec.key === "overview") continue;
+    if (smp.low_diversity && sec.key !== "qc") continue;
     const blocks = smp.blocks[sec.key] || [];
     out.push($("h3", { id: "s-" + sec.key }, sec.title));
     if (sec.key === "coverage") out.push($("p", { class: "desc" }, SEC.coverage.desc), ...plots(s));
@@ -623,8 +646,11 @@ function sampleView(s) {
 function toolView(key) {
   const sec = SEC[key], out = [$("h2", {}, sec.title), $("p", { class: "desc" }, sec.desc)];
   if (key === "overview") {
+    const low = D.order.filter(x => D.samples[x].low_diversity);
+    if (low.length) out.push($("div", { class: "banner" }, `⚠ Low diversity, not analysed (theoretical depth below min_theoretical_depth): ${low.join(", ")}`));
     if (D.summary) out.push(table(D.summary, { sampleCol: 0, heat: (i, v) => {
       const c = D.summary.columns[i], n = num(v);
+      if (c === "status") return v === "ok" ? "ok" : "bad";
       if (c === "min_replicon_breadth" && n !== null) return n < 50 ? "bad" : n < 95 ? "warn" : "ok";
       if (c === "pct_mapped" && n !== null) return n < 50 ? "bad" : n < 90 ? "warn" : null;
       return null; } }));
@@ -653,7 +679,7 @@ function toolView(key) {
       }
     }
   }
-  if (key === "coverage") for (const s of D.order) out.push($("h3", {}, $("a", { onclick: () => go("sample", s) }, s)), ...plots(s));
+  if (key === "coverage") for (const s of D.order.filter(x => !D.samples[x].low_diversity)) out.push($("h3", {}, $("a", { onclick: () => go("sample", s) }, s)), ...plots(s));
   return out;
 }
 
@@ -680,7 +706,8 @@ function nav() {
       const r = summaryRow(s);
       const sub = [D.samples[s].platform, r.detected_mutations && r.detected_mutations !== "NA" ? r.detected_mutations + " var" : null,
                    r.low_cov_regions && r.low_cov_regions !== "NA" ? r.low_cov_regions + " lowcov" : null].filter(Boolean).join(" · ");
-      n.append($("a", { class: s === state.sample ? "on" : "", onclick: () => go("sample", s) }, s, $("small", {}, sub)));
+      const small = D.samples[s].low_diversity ? $("small", { class: "lowdiv" }, "LOW DIVERSITY · skipped") : $("small", {}, sub);
+      n.append($("a", { class: s === state.sample ? "on" : "", onclick: () => go("sample", s) }, s, small));
     }
   } else for (const sec of D.sections) n.append($("a", { class: sec.key === state.tool ? "on" : "", onclick: () => go("tool", sec.key) }, sec.title));
 }

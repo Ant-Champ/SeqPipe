@@ -25,6 +25,26 @@ def ref_length(sample):
     return _genbank_length(ref_gb_path(sample))
 
 
+def ok_samples(names=None):
+    """The samples (default: all) that passed the depth check (rule depth_check),
+    in sheet order. Only call inside input / params functions: it waits for the
+    depth_checks checkpoint (every sample's QC) before answering."""
+    names = SAMPLE_NAMES if names is None else names
+    if not MIN_THEORETICAL_DEPTH:
+        return list(names)
+    with open(checkpoints.depth_checks.get().output[0]) as fh:
+        status = dict(l.split("\t")[0::5] for l in fh.read().splitlines()[1:] if l.strip())
+    return [s for s in names if status.get(s) == "ok"]
+
+
+def depth_checks():
+    """depth_check tables ([] when the check is off)."""
+    if not MIN_THEORETICAL_DEPTH:
+        return []
+    return [OUT_DIR + "depth_check.tsv"] + \
+        expand(OUT_DIR + "{sample}/qc/{sample}.depth_check.tsv", sample=SAMPLE_NAMES)
+
+
 def raw_reads(sample):
     """Raw input FASTQ(s) of a sample, as written in the sheet: [reads] for ONT, [R1, R2] for short reads."""
     r = [samples.at[sample, "reads1"]]

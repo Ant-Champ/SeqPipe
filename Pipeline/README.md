@@ -77,7 +77,8 @@ filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └�
 | Read statistics, flagstat, coverage per replicon | always | ✓ | ✓ |
 | SNPs / small indels → `simple.tsv` | `run_variant_calling` | medaka | bcftools (haploid) |
 | GATC site + gene annotation of those variants | `run_gatc_annotation` | ✓ | ✓ |
-| Low-coverage regions (deleted genes), annotated | `run_coverage_analysis` | ✓ | ✓ |
+| Depth check: below `min_theoretical_depth` (5×) the sample is "low diversity" and skipped | always (0 = off) | ✓ | ✓ |
+| Low-coverage regions (deleted genes), annotated | `run_coverage_analysis` | ✓ | ✓ (repeats masked: `run_mappability_filter`) |
 | Large indels + breakpoints, annotated | `run_sv_scan` | ✓ | ✓ |
 | Multimer / concatemer detection | `run_multimer_analysis` | ✓ | skipped (reads too short) |
 | De novo assembly | `run_denovo_assembly` | Flye | Unicycler |
@@ -390,15 +391,18 @@ Rule (step) names for `--forcerun` / `--until`:
   report.html                         <- start here: everything in one page (see 5.1)
   summary.tsv                         <- one row per sample
   coverage_summary.tsv                <- every sample x replicon (reference + plasmid panel): breadth, depth
+  depth_check.tsv                     <- theoretical depth of every sample, ok / low_diversity
+  mappability/<ref>.pe75_ins300_q20.unmappable.bed   short reads: repeats ignored by the low-coverage scan
   <sample>/
     <sample>.sorted.bam(.bai)         alignment to the sample's reference (open in IGV with <sample>.ref.fasta)
     <sample>.flagstat.txt             % mapped (wrong reference or contamination if low)
     <sample>.ref.gb / .ref.fasta      the reference used
     qc/<sample>.read_stats.tsv        reads / bases / N50, raw and filtered
     qc/<sample>.fastp.html            short reads: trimming report
+    qc/<sample>.depth_check.tsv       theoretical depth (a low_diversity sample stops here)
     <sample>.simple.tsv               SNPs / small indels
     <sample>.annotated.gatc.simple.tsv  ... + NearGATC + gene annotation (+ multimer column, ONT)
-    coverage/<sample>.coverage_summary.tsv   per replicon: mean/median depth, % zero, % low
+    coverage/<sample>.coverage_summary.tsv   per replicon: mean/median depth, % zero, % low, % masked
     annotated/<sample>.low_coverage.annotated.tsv    deletions (with the genes hit)
     annotated/<sample>.high_coverage.annotated.tsv   duplications / amplifications (fold vs replicon median)
     annotated/<sample>.indels.annotated.tsv
@@ -464,6 +468,7 @@ there but could not be read, and the reason is in `logs/run_summary.log`.
 
 | column | meaning |
 |---|---|
+| `status` | `ok`, or `low_diversity (1.97x < 5x)`: too few bases for `min_theoretical_depth`, the sample was not aligned or analysed (other columns `NA`) |
 | `raw_reads`, `raw_bases`, `filt_reads`, `filt_bases` | before / after filtering (R1+R2 summed for short reads) |
 | `filt_N50` | ONT read N50 after filtering |
 | `ref_length`, `ref_records` | total reference length (all records), number of records |
@@ -485,7 +490,7 @@ or `.` if there are none.
 
 | table | columns |
 |---|---|
-| `low_coverage` | contig, start, end, length, mean_depth, min_depth |
+| `low_coverage` | contig, start, end, length, mean_depth, min_depth, masked_bp, rel_depth (mean / median) |
 | `high_coverage` | contig, start, end, length, mean_depth, replicon_median, fold |
 | `indels` | contig, start, end, type (`INS`/`DEL`), n_reads, median_len, min_len, max_len, depth, frac_reads |
 | `breakpoints` | contig, start, end, side (`L`/`R` soft clip), n_reads, n_split, depth, frac_reads |
@@ -497,9 +502,22 @@ How to read them:
   `low_coverage` region with `min_depth` 0.
 - **GC-extreme regions** give shallow but non-zero dips.
 - **Low-coverage threshold.** It is relative, with a fixed floor: a base is "low" when its
-  depth is below `max(lowcov_min_depth, lowcov_frac × median depth)`, the median being taken
-  over the whole reference. With the defaults: median 80× → low below 20×; median 30× → low
-  below 10× (the floor). Only regions of at least `lowcov_min_len` bp are reported.
+  depth, averaged over `lowcov_smooth` bp, is below `max(lowcov_min_depth, lowcov_frac × median depth)`,
+  the median being taken over the whole reference. With the defaults: median 80× → low below 20×;
+  median 30× → low below 10× (the floor). The threshold is capped at `lowcov_max_thr_frac × median`
+  (0.5): at a median of 8×, a 5× floor would otherwise call ordinary depth dips "low" all over
+  the genome. Low stretches closer than `lowcov_merge_gap` are merged; a region is kept only if it
+  is at least `lowcov_min_len` bp **and** its mean depth is at most `lowcov_region_max_frac × median`
+  (0.25): a real deletion is ~0× all along, a chain of dips is not. The log
+  (`<sample>/logs/lowcov.log`) prints the threshold used and how many candidates were dropped.
+- **Mappability mask (short reads).** Reads from repeats (rRNA operons, IS elements, tRNA
+  clusters) get MAPQ 0 and look like a deletion. With `run_mappability_filter` (default on), perfect
+  PE reads (`mappability_read_len`, `mappability_insert`) are simulated from each reference,
+  mapped back with bwa-mem2, and the bases they cannot cover at MAPQ ≥ `min_mapq` are ignored by
+  the low-coverage scan (and left out of the median). The mask is
+  `<out_dir>/mappability/<reference>.pe75_ins300_q20.unmappable.bed` (once per reference; set
+  `mappability_dir` to a shared folder to reuse it between runs). `masked_bp` in the table says how
+  much of a region is masked; `pct_masked` is in `coverage/<sample>.coverage_summary.tsv`.
 - **A duplication** shows as a `high_coverage` region with `fold` ≈ 2 (≈ 3 for two extra
   copies), often with breakpoints at its ends. The threshold is relative to the median of the
   replicon the region is on, so a multicopy plasmid is not flagged as a whole (its copy number
@@ -548,8 +566,16 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `fastp_min_length`, `fastp_min_qual` | 30, 20 | short-read trimming |
 | `simplify_min_qual` | 50 | ONT variants: keep those in more than this % of reads (despite the name, not a QUAL) |
 | `bcftools_min_qual` | 30 | SR variants: minimum QUAL |
-| `lowcov_min_depth`, `lowcov_frac` | 10, 0.25 | "low" = depth < max(min_depth, frac × median) |
+| `min_theoretical_depth` | 5 | filtered bases / reference length below this → `low_diversity`: sample skipped after QC, red banner in the report. 0 = off |
+| `lowcov_min_depth`, `lowcov_frac` | 10, 0.25 | "low" = smoothed depth < max(min_depth, frac × median) |
+| `lowcov_max_thr_frac` | 0.5 | ...but the threshold never exceeds this × the median |
+| `lowcov_smooth` | 50 | bp over which depth is averaged before calling "low" (1 = per base) |
 | `lowcov_min_len`, `lowcov_merge_gap` | 20, 10 | minimum region length (raise it, e.g. 500, to keep only large deletions); merge regions closer than this |
+| `lowcov_region_max_frac` | 0.25 | drop a region whose mean depth is above this × the median |
+| `run_mappability_filter` | true | short reads: ignore unmappable (repeat) bases in the low-coverage scan |
+| `mappability_read_len`, `mappability_insert` | 75, 300 | read length and fragment size of the simulated pairs |
+| `mappability_step`, `mappability_min_frac` | 2, 0.5 | one pair every N bp; unmappable below this fraction of the expected depth |
+| `mappability_dir` | `<out_dir>/mappability/` | where the masks go (a shared folder reuses them between runs) |
 | `highcov_frac`, `highcov_window` | 1.7, 100 | "high" = a window whose mean depth > frac × the median of its own replicon (duplications; fold ≈ 2 per extra copy) |
 | `highcov_min_len`, `highcov_merge_gap` | 1000, 300 | minimum high-coverage region length; merge regions closer than this |
 | `sv_scan.short.*`, `sv_scan.ont.*` | see file | min indel / soft-clip size, min supporting reads, clustering tolerance per read type |
@@ -591,6 +617,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |
 | IGV snapshots fail | check `igv_exe` and that `xvfb-run` exists on the node (`which xvfb-run`) |
+| no IGV pictures, no error | `run_igv_snapshots` is `false` (the report says "IGV snapshots are off"). Set it to `true` (and `run_cassette_search: true`) |
+| a sample has a red "Low diversity" banner | too few bases for `min_theoretical_depth`: re-sequence, or lower `min_theoretical_depth` to force the analysis |
+| low-coverage regions all over a low-depth sample | check `<sample>/logs/lowcov.log` (threshold, median). Lower `lowcov_min_depth`, raise `lowcov_min_len` (e.g. 500), or lower `lowcov_region_max_frac` |
 | `OUT_OF_MEMORY` / killed jobs | ask more `--mem` in `salloc`, or lower `*_threads` |
 
 ---

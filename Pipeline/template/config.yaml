@@ -33,6 +33,12 @@ run_html_report       : true    # <out_dir>/report.html: every result by sample 
 stage_mode : "symlink"   # symlink (saves disk) | copy -- how raw FASTQs are brought into out_dir
 min_mapq   : 20          # minimum mapping quality (low coverage, SV scan, short-read variant calling)
 
+# --- depth check (low diversity) -----------------------------------------
+# theoretical depth = filtered bases / reference length. Below this the sample
+# is "low_diversity": QC only, no alignment / analysis, red banner in the
+# report, status column in summary.tsv. 0 = off.
+min_theoretical_depth : 5
+
 # --- threads / memory per job ---------------------------------------------
 # Jobs share the salloc allocation: run.sh gives snakemake all its CPUs and
 # memory, and runs as many jobs at once as fit.
@@ -58,14 +64,33 @@ bcftools_min_baseq : 20
 bcftools_max_depth : 10000
 
 # --- low-coverage regions (deletions) --------------------------------------
-# RELATIVE threshold with a fixed floor: a base is "low" if
-#   depth < max(lowcov_min_depth, lowcov_frac x median depth)
-# median depth = over the whole reference (all replicons together).
-# e.g. median 80x -> low below max(10, 20) = 20x ; median 30x -> below 10x.
+# RELATIVE threshold with a fixed floor: a base is "low" if its depth,
+# averaged over lowcov_smooth bp, is
+#   < max(lowcov_min_depth, lowcov_frac x median depth)
+# but the threshold is never above lowcov_max_thr_frac x median (at a median of
+# 8x, a floor of 5x would call ordinary depth dips "low" all over the genome).
+# median depth = over the whole reference (all replicons, unmappable bases excluded).
+# e.g. median 80x -> low below max(10, 20) = 20x ; median 30x -> below 10x ;
+#      median 8x  -> max(10, 2) = 10, capped at 4x.
 lowcov_min_depth : 10     # fixed floor (x)
 lowcov_frac      : 0.25   # fraction of the median depth
+lowcov_max_thr_frac : 0.5 # the threshold never exceeds this x the median
+lowcov_smooth    : 50     # average depth over this many bp before calling "low" (1 = per base)
 lowcov_min_len   : 20     # report only regions at least this long (bp); e.g. 500 for gene-size deletions only
-lowcov_merge_gap : 10     # merge low regions closer than this (bp), before the length filter
+lowcov_merge_gap : 10     # merge low regions closer than this (bp, unmasked), before the length filter
+lowcov_region_max_frac : 0.25  # drop a region whose mean depth is above this x the median
+                               # (a real deletion is ~0x all along; a cluster of dips is not)
+
+# Mappability mask (short reads only): perfect PE reads are simulated from each
+# reference and mapped back with bwa-mem2; bases they cannot cover with
+# MAPQ >= min_mapq (repeats: rRNA operons, IS elements...) are ignored by the
+# low-coverage scan. Computed once per reference and read settings.
+run_mappability_filter : true
+mappability_read_len   : 75     # your read length (PE75)
+mappability_insert     : 300    # typical fragment length (bp)
+mappability_step       : 2      # one simulated pair every N bp (1 = finest, slower)
+mappability_min_frac   : 0.5    # unmappable below this fraction of the expected simulated depth
+mappability_dir        : ""     # "" = <out_dir>/mappability/ ; set a shared folder (e.g. <ref_dir>/mappability) to reuse between runs
 
 # --- high-coverage regions (duplications, amplifications) -----------------
 # The replicon is cut into highcov_window bp windows; a window is "high" if
@@ -160,6 +185,6 @@ report_embed_igv : true   # IGV pictures inside report.html (false: links to the
 #   lowcov: lowcov.py                     sv_scan: sv_scan.py
 #   annotate_regions: annotate_regions.py coverage_summary: aggregate_coverage.1.py
 #   find_cassette_insertions: find_cassette_insertions.py
-#   run_igv_snapshots: run_igv_snapshots.py
+#   run_igv_snapshots: run_igv_snapshots.py  mappability: mappability.py
 script_dir : ""
 script: {}               # e.g.  script: {simplify: "simplify.5.py"}

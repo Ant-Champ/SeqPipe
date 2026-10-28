@@ -3,9 +3,13 @@
 #   ONT          : filtlong (length / quality), as in the ONT pipeline
 #   short reads  : fastp (adapter + quality trimming)
 # run_read_filtering: false passes the reads through unchanged.
+# depth_check: samples with too few bases for min_theoretical_depth are
+# 'low_diversity' and skipped; depth_checks (checkpoint, one per run) gathers
+# them so ok_samples() can decide what to run next.
 # ======================================================================
 
 FILTER_MODE = config.get("filter_mode", "best95per") if RUN_FILTERING else "none"
+MIN_THEORETICAL_DEPTH = config.get("min_theoretical_depth", 5) or 0
 
 
 def target_bases(wildcards):
@@ -109,3 +113,43 @@ rule read_stats:
         "../envs/qc.yaml"
     shell:
         r"""seqkit stats -a -T -j {threads} {input.raw} {input.filt} > "{output}" 2> "{log}" """
+
+
+rule depth_check:
+    """Theoretical depth = filtered bases / reference length. Below
+    min_theoretical_depth the sample is 'low_diversity': it is not aligned or
+    analysed further (red banner in the report). Off when min_theoretical_depth is 0."""
+    input:
+        stats = OUT_DIR + "{sample}/qc/{sample}.read_stats.tsv",
+        fai   = OUT_DIR + "{sample}/{sample}.ref.fasta.fai",
+    output:
+        OUT_DIR + "{sample}/qc/{sample}.depth_check.tsv",
+    params:
+        filt      = lambda wc: [os.path.basename(p) for p in filt_reads(wc)],
+        min_depth = MIN_THEORETICAL_DEPTH,
+    run:
+        import csv
+        with open(input.stats, newline="") as fh:
+            rows = {os.path.basename(r["file"]): r for r in csv.DictReader(fh, delimiter="\t")}
+        bases = sum(int(rows[f]["sum_len"].replace(",", "")) for f in params.filt)
+        with open(input.fai) as fh:
+            ref_len = sum(int(l.split("\t")[1]) for l in fh if l.strip())
+        depth = bases / ref_len if ref_len else 0.0
+        status = "ok" if depth >= params.min_depth else "low_diversity"
+        with open(output[0], "w") as out:
+            out.write("sample\tfilt_bases\tref_length\ttheoretical_depth\tmin_theoretical_depth\tstatus\n")
+            out.write(f"{wildcards.sample}\t{bases}\t{ref_len}\t{depth:.2f}\t{params.min_depth}\t{status}\n")
+
+
+checkpoint depth_checks:
+    """All depth_check tables in one: the DAG is rebuilt from it (ok_samples())."""
+    input:
+        expand(OUT_DIR + "{sample}/qc/{sample}.depth_check.tsv", sample=SAMPLE_NAMES),
+    output:
+        OUT_DIR + "depth_check.tsv",
+    run:
+        with open(output[0], "w") as out:
+            for i, path in enumerate(input):
+                with open(path) as fh:
+                    lines = fh.read().splitlines()
+                out.write("\n".join(lines if i == 0 else lines[1:]) + "\n")

@@ -1,0 +1,5 @@
+channels: [conda-forge, bioconda]
+dependencies:
+  - python=3.12
+  - biopython
+  - bwa-mem2>=2.2.1

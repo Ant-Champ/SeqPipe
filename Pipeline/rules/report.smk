@@ -45,27 +45,28 @@ rule depth_profile:
         """
 
 
-def _report_inputs():
+def _report_inputs(wildcards=None):
     d = dict(_run_summary_inputs())
+    OK = ok_samples()
     d["summary"] = OUT_DIR + "summary.tsv"
-    d["depth"] = expand(OUT_DIR + "{sample}/coverage/{sample}.depth_bins.tsv", sample=SAMPLE_NAMES)
+    d["depth"] = expand(OUT_DIR + "{sample}/coverage/{sample}.depth_bins.tsv", sample=OK)
     d["ref_gb"] = expand(OUT_DIR + "{sample}/{sample}.ref.gb", sample=SAMPLE_NAMES)
     if RUN_COVERAGE or RUN_PLASMID_SCREEN:
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"
     if RUN_PLASMID_SCREEN:
-        d["plasmid_cov"] = expand(OUT_DIR + "{sample}/{sample}.plasmid_coverage.tsv", sample=SAMPLE_NAMES)
+        d["plasmid_cov"] = expand(OUT_DIR + "{sample}/{sample}.plasmid_coverage.tsv", sample=OK)
     if RUN_CASSETTES:
         d["cassette_more"] = expand(OUT_DIR + "{sample}/annotated/{sample}.cassette_junctions.annotated.tsv",
-                                    sample=SAMPLE_NAMES) \
-                           + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=SAMPLE_NAMES)
+                                    sample=OK) \
+                           + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK)
     if RUN_IGV:
-        d["igv"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=SAMPLE_NAMES)
+        d["igv"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=OK)
     return d
 
 
 rule html_report:
     input:
-        **_report_inputs()
+        unpack(_report_inputs)
     output:
         html = OUT_DIR + "report.html",
     log:
