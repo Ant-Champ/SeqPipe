@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""snapshot_regions -- IGV-like PNG of every region of a table, drawn with
-matplotlib (no Java, no X server: works on any compute node).
+"""snapshot_regions -- genome-browser-style PNG of every region of a table, drawn
+with matplotlib (no Java, no X server: works on any compute node). The
+pipeline's tool for read-level pictures: reuse it for new ones.
 
 For each region (--regions: '#' header, contig start end length status cassette
 ..., 0-based half-open; e.g. the cassette hotspots table) +/- --flank bp:
@@ -13,7 +14,7 @@ For each region (--regions: '#' header, contig start end length status cassette
   * dashed lines at the junction positions of the table's 'junctions' column
     (pos:reads), if there is one.
 One PNG per region in --outdir: NN_<status>_<cassette>_<contig>_<start>-<end>.png
-(1-based in the name, as the IGV snapshots). No region -> NO_CASSETTE_INSERTIONS.txt.
+(1-based coordinates in the name). No region -> NO_CASSETTE_INSERTIONS.txt.
 
 Needs pysam, matplotlib, biopython.
 """

@@ -77,19 +77,27 @@ RUN_MULTIMER       = config.get("run_multimer_analysis", True)
 RUN_DENOVO         = config.get("run_denovo_assembly", False)
 RUN_PLASMID_SCREEN = config.get("run_plasmid_screen", False)
 RUN_CASSETTES      = config.get("run_cassette_search", False)
-RUN_IGV            = RUN_CASSETTES and config.get("run_igv_snapshots", False)   # pictures of every hotspot
-SNAPSHOT_TOOL      = str(config.get("snapshot_tool", "python")).lower()         # python (no Java/X) | igv
 RUN_REPORT         = config.get("run_html_report", True)
+
+# Renamed keys (IGV was replaced by pictures drawn by the pipeline,
+# scripts/snapshot_regions.py): the old names are still read, with a warning.
+for _old, _new in (("run_igv_snapshots", "run_hotspot_pictures"), ("igv_flank", "picture_flank"),
+                   ("report_embed_igv", "report_embed_pictures")):
+    if _old in config:
+        print(f"WARNING: config key {_old} is now called {_new}: please rename it in config.yaml.",
+              file=sys.stderr)
+        config.setdefault(_new, config[_old])
+_ignored = [k for k in ("igv_exe", "igv_heap_mb", "igv_mem_mb", "snapshot_tool") if k in config]
+if _ignored:
+    print(f"WARNING: config key(s) {', '.join(_ignored)} are no longer used (IGV was removed: the "
+          "pipeline draws the hotspot pictures itself). You can delete them.", file=sys.stderr)
+RUN_PICTURES       = RUN_CASSETTES and config.get("run_hotspot_pictures", False)  # a picture of every hotspot
 
 if "run_cassette_hotspots" in config:
     print("WARNING: run_cassette_hotspots / cassette_reference are no longer used: cassette locations "
           "are now found by run_cassette_search with the cassettes of cassette_dir (see README).",
           file=sys.stderr)
 
-if SNAPSHOT_TOOL not in ("python", "igv"):
-    raise WorkflowError(f"snapshot_tool must be python or igv, not '{SNAPSHOT_TOOL}'")
-if RUN_IGV and SNAPSHOT_TOOL == "igv" and not config.get("igv_exe"):
-    raise WorkflowError("snapshot_tool is igv but igv_exe is not set in config.yaml.")
 
 
 SEQ_EXTENSIONS = ".gb/.gbk/.genbank/.fasta/.fa/.fna"
@@ -293,8 +301,8 @@ def _rule_all_inputs(wildcards=None):
             sample=OK, table=["insertions", "junctions", "hotspots"]
         )
         d["cassette_counts"] = expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK)
-    if RUN_IGV:
-        d["cassette_igv_snapshots"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=OK)
+    if RUN_PICTURES:
+        d["cassette_pictures"] = expand(OUT_DIR + "{sample}/cassettes/pictures", sample=OK)
     if RUN_COVERAGE or RUN_PLASMID_SCREEN:
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"
     if RUN_REPORT:

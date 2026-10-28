@@ -3,13 +3,13 @@
 report.py -- one self-contained HTML report of the run.  Used through
 Snakemake's `script:` directive (rule html_report, rules/report.smk).
 
-snakemake.params : samples (list of dicts), out_dir, toggles (dict), embed_igv
+snakemake.params : samples (list of dicts), out_dir, toggles (dict), embed_pictures
 snakemake.output : html
 snakemake.config : shown in the report ("Run settings")
 
 Python gathers every small result table into one JSON object (tables are
 kept as text: columns + rows), the binned depth (depth_profile), the genes
-of each GenBank reference and the IGV snapshots (base64 PNG). The page
+of each GenBank reference and the hotspot pictures (base64 PNG). The page
 itself (HTML/CSS/JS below) builds both views from that object:
   * By sample   : one page per sample with every analysis
   * By analysis : one page per analysis with every sample
@@ -47,7 +47,7 @@ SECTIONS = [
      "Large indels from CIGARs and clipped-read breakpoint clusters."),
     ("cassettes", "Cassette insertions", "cassettes",
      "Where each cassette of cassette_dir is inserted (junction reads), the depth along each cassette "
-     "(all reads, including those of the ends cassettes share) and the IGV snapshots."),
+     "(all reads, including those of the ends cassettes share) and a picture of every hotspot."),
     ("plasmids",  "Plasmid panel", "plasmid_panel",
      "Breadth (% covered) and mean depth of every panel plasmid in every sample."),
     ("multimer",  "Plasmid multimers", "multimer",
@@ -166,7 +166,7 @@ def events_from(t, kind, label_cols):
 # ----------------------------------------------------------------------
 # per sample
 # ----------------------------------------------------------------------
-def gather_sample(s, out_dir, tg, embed_igv):
+def gather_sample(s, out_dir, tg, embed_pictures):
     name, ont = s["sample_name"], s["platform"] == "ont"
     d = os.path.join(out_dir, name)
     base = os.path.join(d, name)
@@ -237,20 +237,17 @@ def gather_sample(s, out_dir, tg, embed_igv):
         add("cassettes", "Junctions", table=read_table(ann + ".cassette_junctions.annotated.tsv"))
         add("cassettes", "Reads per cassette", table=read_table(
             os.path.join(d, "cassettes", name + ".cassette_counts.tsv")))
-        igv_dir = os.path.join(d, "cassettes", "igv_snapshots")
-        pngs = sorted(glob.glob(os.path.join(igv_dir, "*.png")))
+        pic_dir = os.path.join(d, "cassettes", "pictures")
+        pngs = sorted(glob.glob(os.path.join(pic_dir, "*.png")))
         if pngs:
-            imgs = [[png_data_uri(p) if embed_igv else rel(p), os.path.basename(p)[:-4]] for p in pngs]
-            add("cassettes", "IGV snapshots", images=imgs)
-        elif os.path.isfile(os.path.join(igv_dir, "IGV_FAILED.txt")):
-            add("cassettes", "IGV snapshots", note="IGV failed for this sample (see "
-                + rel(os.path.join(igv_dir, "IGV_FAILED.txt")) + ").")
-        elif os.path.isfile(os.path.join(igv_dir, "NO_CASSETTE_INSERTIONS.txt")):
-            add("cassettes", "IGV snapshots", note="No insertion site, so no snapshot.")
-        elif tg.get("igv"):
-            add("cassettes", "IGV snapshots", note="No snapshot found in " + rel(igv_dir))
+            imgs = [[png_data_uri(p) if embed_pictures else rel(p), os.path.basename(p)[:-4]] for p in pngs]
+            add("cassettes", "Hotspot pictures", images=imgs)
+        elif os.path.isfile(os.path.join(pic_dir, "NO_CASSETTE_INSERTIONS.txt")):
+            add("cassettes", "Hotspot pictures", note="No hotspot, so no picture.")
+        elif tg.get("pictures"):
+            add("cassettes", "Hotspot pictures", note="No picture found in " + rel(pic_dir))
         else:
-            add("cassettes", "IGV snapshots", note="IGV snapshots are off (set run_igv_snapshots: true).")
+            add("cassettes", "Hotspot pictures", note="Pictures are off (set run_hotspot_pictures: true).")
     if tg.get("plasmid_panel"):
         add("plasmids", "Plasmid panel coverage (samtools coverage)",
             table=read_table(base + ".plasmid_coverage.tsv"))
@@ -306,7 +303,7 @@ def cassette_features(cassettes):
     return out
 
 
-def main(samples, out_dir, toggles, embed_igv, config, out_html, cassettes=()):
+def main(samples, out_dir, toggles, embed_pictures, config, out_html, cassettes=()):
     data = {
         "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "out_dir": os.path.abspath(out_dir),
@@ -323,7 +320,7 @@ def main(samples, out_dir, toggles, embed_igv, config, out_html, cassettes=()):
     for s in samples:
         name = s["sample_name"]
         log("sample " + name)
-        data["samples"][name] = gather_sample(s, out_dir, toggles, embed_igv)
+        data["samples"][name] = gather_sample(s, out_dir, toggles, embed_pictures)
         ref = s["reference"]
         data["ref_of"][name] = ref
         if ref not in data["genes"]:
@@ -806,5 +803,5 @@ if "snakemake" in globals():
     with open(str(_sm.log[0]), "w") as _log:
         sys.stderr = _log
         main(list(_sm.params.samples), str(_sm.params.out_dir), dict(_sm.params.toggles),
-             bool(_sm.params.embed_igv), dict(_sm.config), str(_sm.output.html),
+             bool(_sm.params.embed_pictures), dict(_sm.config), str(_sm.output.html),
              list(_sm.params.get("cassettes", [])))

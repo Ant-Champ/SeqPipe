@@ -12,7 +12,7 @@
 # are junction evidence too (most junction reads have no split alignment).
 # Hotspots: every read on a cassette is followed back to the genome (its mate,
 # its soft clip located in the genome, junction reads); nearby evidence is
-# merged into hotspots, and IGV takes a picture of each one.
+# merged into hotspots, and a picture of each one is drawn (run_hotspot_pictures).
 # The cassette IDENTITY of a site is only called from uniquely mapped
 # evidence (the read itself, or its mate); otherwise it is reported as
 # ambiguous(A|B) -- the position is still valid.
@@ -198,14 +198,13 @@ rule annotate_cassette_tables:
 
 
 # ----------------------------------------------------------------------
-# Pictures of every hotspot (run_igv_snapshots). snapshot_tool: python
-# (default) draws an IGV-like view with matplotlib -- works on any compute
-# node; igv runs IGV itself (config igv_exe, needs xvfb-run and the X11
-# libraries of IGV's Java on the node).
+# A picture of every hotspot (run_hotspot_pictures), drawn by
+# scripts/snapshot_regions.py with matplotlib: no Java / X server needed,
+# works on any compute node.
 # ----------------------------------------------------------------------
-if RUN_IGV and SNAPSHOT_TOOL == "python":
+if RUN_PICTURES:
 
-    rule cassette_igv_snapshots:
+    rule cassette_pictures:
         """One PNG per cassette hotspot: features, depth, and the reads of the
         genome + cassettes alignment (clips, mates on a cassette, split reads)."""
         input:
@@ -216,69 +215,18 @@ if RUN_IGV and SNAPSHOT_TOOL == "python":
             cassette_bai = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam.bai",
             gb           = OUT_DIR + "{sample}/{sample}.ref.gb",
         output:
-            snapshots = directory(OUT_DIR + "{sample}/cassettes/igv_snapshots"),
+            pictures = directory(OUT_DIR + "{sample}/cassettes/pictures"),
         log:
-            OUT_DIR + "{sample}/logs/cassette_igv_snapshots.log",
+            OUT_DIR + "{sample}/logs/cassette_pictures.log",
         params:
             exe       = script_path("snapshot_regions", "snapshot_regions.py"),
             cassettes = " ".join(c["name"] for c in CASSETTES),
-            flank     = config.get("igv_flank", 1000),
+            flank     = config.get("picture_flank", 1000),
             min_mapq  = config.get("cassette_min_mapq", 20),
         conda:
             "../envs/snapshots.yaml"
         shell:
             "python {params.exe} --regions {input.regions} --all-bam {input.all_bam} "
             "--cassette-bam {input.cassette_bam} --genbank {input.gb} --cassettes {params.cassettes} "
-            "--outdir {output.snapshots} --sample {wildcards.sample} --flank {params.flank} "
+            "--outdir {output.pictures} --sample {wildcards.sample} --flank {params.flank} "
             "--min-mapq {params.min_mapq} > {log} 2>&1"
-
-# ----------------------------------------------------------------------
-# IGV snapshots (run_igv_snapshots; IGV itself is not in conda -- the
-# rule uses config igv_exe and xvfb-run when it is on PATH)
-# ----------------------------------------------------------------------
-if RUN_IGV and SNAPSHOT_TOOL == "igv":
-
-    rule cassette_igv_snapshots:
-        """One IGV PNG per cassette hotspot (every place where reads on a
-        cassette lead back to the genome): reference + annotation, all reads vs
-        genome, and the genome+cassettes alignment (junction reads, mates)."""
-        input:
-            regions      = OUT_DIR + "{sample}/annotated/{sample}.cassette_hotspots.annotated.tsv",
-            all_bam      = OUT_DIR + "{sample}/{sample}.sorted.bam",
-            all_bai      = OUT_DIR + "{sample}/{sample}.sorted.bam.bai",
-            cassette_bam = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam",
-            cassette_bai = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam.bai",
-            ref          = OUT_DIR + "{sample}/{sample}.ref.fasta",
-            ref_fai      = OUT_DIR + "{sample}/{sample}.ref.fasta.fai",
-            gb           = OUT_DIR + "{sample}/{sample}.ref.gb",
-        output:
-            snapshots = directory(OUT_DIR + "{sample}/cassettes/igv_snapshots"),
-        log:
-            OUT_DIR + "{sample}/logs/cassette_igv_snapshots.log",
-        params:
-            exe     = script_path("run_igv_snapshots", "run_igv_snapshots.py"),
-            igv     = config.get("igv_exe", "igv.sh"),
-            flank   = config.get("igv_flank", 1000),
-            heap_mb = config.get("igv_heap_mb", 4000),
-        resources:
-            mem_mb   = config.get("igv_mem_mb", 6000),
-            igv_jobs = 1,          # run.sh allows 4 IGVs at once (IGV_JOBS=n to change)
-        conda:
-            "../envs/plasmid_screen.yaml"
-        shell:
-            r"""
-            set -euo pipefail
-            mkdir -p "{output.snapshots}"
-            python "{params.exe}" \
-                --regions "{input.regions}" \
-                --flank {params.flank} \
-                --all-bam "{input.all_bam}" \
-                --cassette-bam "{input.cassette_bam}" \
-                --reference "{input.ref}" \
-                --genbank "{input.gb}" \
-                --outdir "{output.snapshots}" \
-                --igv "{params.igv}" \
-                --label cassette \
-                --memory {params.heap_mb} \
-                > "{log}" 2>&1
-            """

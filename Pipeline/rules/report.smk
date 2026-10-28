@@ -6,7 +6,7 @@
 # into at most report_max_bins bins per replicon, for the interactive
 # coverage plots. html_report (scripts/report.py) reads the same small
 # result files as the summary, plus the depth bins, the GenBank genes and
-# the IGV snapshots (run_igv_snapshots), and writes <out_dir>/report.html:
+# the hotspot pictures (run_hotspot_pictures), and writes <out_dir>/report.html:
 # one file, no internet needed to open it, two views (by sample / by
 # analysis). Links to bigger files (fastp reports, assemblies) are relative,
 # so keep report.html inside <out_dir>.
@@ -62,8 +62,8 @@ def _report_inputs(wildcards=None):
                                     sample=OK) \
                            + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK) \
                            + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_depth.tsv", sample=OK)
-    if RUN_IGV:
-        d["igv"] = expand(OUT_DIR + "{sample}/cassettes/igv_snapshots", sample=OK)
+    if RUN_PICTURES:
+        d["pictures"] = expand(OUT_DIR + "{sample}/cassettes/pictures", sample=OK)
     return d
 
 
@@ -87,9 +87,9 @@ rule html_report:
             "denovo":        bool(RUN_DENOVO),
             "plasmid_panel": bool(RUN_PLASMID_SCREEN),
             "cassettes":     bool(RUN_CASSETTES),
-            "igv":           bool(RUN_IGV),
+            "pictures":      bool(RUN_PICTURES),
         },
-        embed_igv = config.get("report_embed_igv", True),
+        embed_pictures = config.get("report_embed_pictures", True),
         cassettes = CASSETTES if RUN_CASSETTES else [],      # their features under the cassette plots
     conda:
         "../envs/python.yaml"

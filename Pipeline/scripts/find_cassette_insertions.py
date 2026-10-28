@@ -34,7 +34,7 @@ genome -- its mate (unique on the genome), its soft clip (the clipped bases
 located once, exactly, in the genome; any read on a cassette, primary or
 supplementary), and the junction reads above. Evidence closer than
 --hotspot-gap bp is merged into one hotspot; hotspots with >= --hotspot-min-reads
-reads are reported (IGV takes a picture of each), even when no precise
+reads are reported (snapshot_regions.py draws each), even when no precise
 junction pair could be called.
 
 Coordinates are 0-based half-open. A junction 'pos' is the boundary on the

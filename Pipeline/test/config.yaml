@@ -14,7 +14,7 @@ run_multimer_analysis : true
 run_denovo_assembly   : true
 run_plasmid_screen    : true
 run_cassette_search   : true
-run_igv_snapshots     : false
+run_hotspot_pictures  : true
 
 plasmid_panel_dir  : "data/panel/"
 cassette_dir       : "data/cassettes/"

@@ -67,7 +67,7 @@ GenBank ─ FASTA + indexes ─────────────────�
                                                                       ├─ multimers (ONT only)
 filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └──────────────┐
                 ├─ plasmid panel screen                                              ├─ summary.tsv
-                └─ genome + all cassettes ─ junctions ─ insertion sites ─ IGV ───────┴─ report.html
+                └─ genome + all cassettes ─ junctions ─ hotspots ─ pictures ─────────┴─ report.html
 ```
 
 | Step | config toggle | ONT | Element / Illumina (SR) |
@@ -84,9 +84,9 @@ filtered reads ─┬─ de novo assembly (Flye | Unicycler)                └�
 | De novo assembly | `run_denovo_assembly` | Flye | Unicycler |
 | Coverage of a shared plasmid panel | `run_plasmid_screen` | ✓ | ✓ |
 | Where the cassettes of `cassette_dir` are inserted | `run_cassette_search` | ✓ | ✓ (mates resolve identity) |
-| IGV pictures of each insertion site | `run_igv_snapshots` | ✓ | ✓ |
+| A picture of each cassette hotspot (reads, clips, mates; drawn by the pipeline) | `run_hotspot_pictures` | ✓ | ✓ |
 | `summary.tsv`, one row per sample | always | ✓ | ✓ |
-| `report.html`: every result, by sample or by analysis, with coverage plots and the IGV pictures | `run_html_report` (default on) | ✓ | ✓ |
+| `report.html`: every result, by sample or by analysis, with coverage plots and the hotspot pictures | `run_html_report` (default on) | ✓ | ✓ |
 
 **How a deletion is found.** It shows up in three tables:
 - in `low_coverage`, as a region with `min_depth` 0 over the deleted gene;
@@ -270,7 +270,7 @@ run_multimer_analysis : true
 run_denovo_assembly   : false
 run_plasmid_screen    : false
 run_cassette_search   : false    # true: locate every cassette of cassette_dir, in every sample
-run_igv_snapshots     : false
+run_hotspot_pictures  : false
 cassette_dir          : "/home/antoine9/Pipeline/references/cassettes/"
 ```
 
@@ -394,7 +394,7 @@ Rule (step) names for `--forcerun` / `--until`:
   depth_check.tsv                     <- theoretical depth of every sample, ok / low_diversity
   mappability/<ref>.pe75_ins300_q20.unmappable.bed   short reads: repeats ignored by the low-coverage scan
   <sample>/
-    <sample>.sorted.bam(.bai)         alignment to the sample's reference (open in IGV with <sample>.ref.fasta)
+    <sample>.sorted.bam(.bai)         alignment to the sample's reference (open in a genome browser with <sample>.ref.fasta)
     <sample>.flagstat.txt             % mapped (wrong reference or contamination if low)
     <sample>.ref.gb / .ref.fasta      the reference used
     qc/<sample>.read_stats.tsv        reads / bases / N50, raw and filtered
@@ -411,10 +411,10 @@ Rule (step) names for `--forcerun` / `--until`:
     <sample>.assembly.fasta / .assembly_info.txt / .assembly_graph.gfa
     <sample>.plasmid_panel.sorted.bam, <sample>.plasmid_coverage.tsv
     annotated/<sample>.cassette_insertions.annotated.tsv   insertion sites (+ replaced genes)
-    annotated/<sample>.cassette_hotspots.annotated.tsv     every place reads on a cassette lead back to (IGV pictures)
+    annotated/<sample>.cassette_hotspots.annotated.tsv     every place reads on a cassette lead back to (pictured)
     annotated/<sample>.cassette_junctions.annotated.tsv    every genome/cassette junction
     cassettes/<sample>.cassette_counts.tsv                 uniquely mapped reads per cassette
-    cassettes/<sample>.genome_cassettes.sorted.bam         reads vs genome + cassettes (IGV), igv_snapshots/*.png
+    cassettes/<sample>.genome_cassettes.sorted.bam         reads vs genome + cassettes; pictures/*.png (one per hotspot)
     coverage/<sample>.depth_bins.tsv  binned depth along each replicon (for the report plots)
     logs/<step>.log                   one log per step: look here when something fails
 ```
@@ -431,7 +431,7 @@ scp narval:~/runs/MY_RUN/results/report.html /mnt/c/Users/Ant/Downloads/
 The two buttons at the top switch between two views:
 - **By sample:** pick a sample on the left. Its page shows key numbers, then every analysis for
   that sample: read QC, coverage plots, variants, low coverage, indels and breakpoints,
-  cassettes with their IGV pictures, plasmid panel, multimers and assembly.
+  cassettes with their hotspot pictures, plasmid panel, multimers and assembly.
 - **By analysis:** pick an analysis on the left. Its page shows that analysis for every sample,
   in one table with a `sample` column. *Overview* holds `summary.tsv` and the run settings.
   *Plasmid panel* shows a sample × plasmid presence matrix.
@@ -457,8 +457,8 @@ To use the plots:
 Tables can be sorted (click a column header) and filtered (type in the box). A table keeps its
 first 5000 rows; the TSV on disk is complete.
 
-The IGV pictures appear when `run_igv_snapshots` is on. They are embedded in the file;
-set `report_embed_igv: false` to link to the PNG files instead and keep `report.html` small. The
+The hotspot pictures appear when `run_hotspot_pictures` is on. They are embedded in the file;
+set `report_embed_pictures: false` to link to the PNG files instead and keep `report.html` small. The
 links to the fastp reports and the assemblies are relative, so they only work if `report.html`
 stays in `<out_dir>`, or if you copy the whole `<out_dir>`.
 
@@ -544,7 +544,9 @@ the genome), its soft-clipped bases (found exactly once in the genome), and the 
 clipped into a cassette. Evidence closer than `cassette_hotspot_gap` bp is one hotspot; a hotspot
 needs `cassette_hotspot_min_reads` reads. A Keio replacement gives one hotspot per side when the
 replaced gene is longer than the gap. Hotspots are reported even when no precise left/right junction pair
-is found, and IGV takes a picture of each one. `junctions` gives the most supported junction bases.
+is found, and each one gets a picture (`run_hotspot_pictures`): genes, depth, and the reads
+stacked as in a genome browser, coloured by evidence (soft clip, mate on a cassette, split to a
+cassette, low MAPQ), with the junction bases marked. `junctions` gives the most supported junction bases.
 | `cassette_junctions` | contig, start, end, genome_side, cassette, cassette_end, orientation, n_reads, n_unique, n_ambiguous, support, junction_id |
 | `cassette_counts` | cassette, length, reads_unique, reads_ambiguous, breadth_unique_pct, mean_depth_unique |
 
@@ -600,14 +602,13 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_reads` | 2 | minimum reads for a junction |
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
 | `cassette_min_clip` | 12 | short reads: a uniquely mapped genome read whose soft clip (≥ this) continues into a cassette is a junction read (most junction reads are only clipped, not split) |
-| `cassette_hotspot_gap`, `cassette_hotspot_min_reads` | 1000, 3 | hotspots: merge evidence closer than this; minimum reads per hotspot (each gets an IGV picture) |
+| `cassette_hotspot_gap`, `cassette_hotspot_min_reads` | 1000, 3 | hotspots: merge evidence closer than this; minimum reads per hotspot (each gets a picture) |
 | `cassette_mate_window` | 1000 | short reads: when the junction reads only hit the ends cassettes share, the read pairs within this distance (genome mate) whose other mate is unique on a cassette name it |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
-| `snapshot_tool` | `python` | pictures of the cassette hotspots: `python` (drawn by the pipeline, any node) or `igv` (needs `igv_exe`, `xvfb-run`, X11 libraries) |
-| `igv_exe`, `igv_heap_mb`, `igv_flank` | —, 4000, 1000 | IGV launcher, Java heap, bp shown around a site. Snapshots also need `xvfb-run` on the node |
+| `picture_flank` | 1000 | bp shown on each side of a hotspot in its picture |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
 | `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
-| `report_embed_igv` | true | put the IGV pictures inside `report.html` (false: link to the PNG files) |
+| `report_embed_pictures` | true | put the hotspot pictures inside `report.html` (false: link to the PNG files) |
 | `*_threads`, `*_mem_mb` | see file | per-job resources inside the allocation |
 
 ---
@@ -631,9 +632,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |
 | reads on a cassette (`cassette_counts.tsv`) but no insertion site | read `<sample>/logs/find_cassette_insertions.log`: `evidence:` = junction reads found, `mate links` = genome positions whose mate is on a cassette. Mate links but no junction → send the log; no mate links at all → the cassette is not next to the reference genome (on a plasmid, or the sample has another reference) |
-| IGV log ends in `java.awt.Toolkit.loadLibraries` / `NativeLibraries.loadLibrary` | IGV's Java cannot load its X11 libraries on the compute node. Use `snapshot_tool: python` (default): the pipeline draws the pictures itself |
-| IGV snapshots fail | check `igv_exe` and that `xvfb-run` exists on the node (`which xvfb-run`). IGV is tried 3 times per sample, at most 4 IGVs run at once (`IGV_JOBS=2 ./run.sh ...` for fewer); if it still fails, the sample gets `igv_snapshots/IGV_FAILED.txt` with IGV's last output and the run goes on |
-| no IGV pictures, no error | `run_igv_snapshots` is `false` (the report says "IGV snapshots are off"). Set it to `true` (and `run_cassette_search: true`) |
+| no hotspot pictures, no error | `run_hotspot_pictures` is `false` (the report says "Pictures are off"). Set it to `true` (and `run_cassette_search: true`) |
+| `WARNING: config key run_igv_snapshots is now called run_hotspot_pictures` (or `igv_flank`, `report_embed_igv`) | an older config: rename the key (the old value is still used meanwhile) |
+| `WARNING: config key(s) igv_exe, … are no longer used` | IGV was removed: delete those lines |
 | a sample has a red "Low diversity" banner | too few bases for `min_theoretical_depth`: re-sequence, or lower `min_theoretical_depth` to force the analysis |
 | low-coverage regions all over a low-depth sample | check `<sample>/logs/lowcov.log` (threshold, median). Lower `lowcov_min_depth`, raise `lowcov_min_len` (e.g. 500), or lower `lowcov_region_max_frac` |
 | `OUT_OF_MEMORY` / killed jobs | ask more `--mem` in `salloc`, or lower `*_threads` |
@@ -665,6 +666,9 @@ Pipeline/
   2. Add its toggle in the `Snakefile` (`RUN_…`).
   3. Add its final output to `_rule_all_inputs()`.
   4. Optionally add a column in `scripts/summary.py`.
+- **Pictures.** Every read-level picture is drawn by `scripts/snapshot_regions.py`
+  (matplotlib, no Java / X server): give it a regions table (`contig start end length status
+  label …`) and the BAMs. Reuse it for any new picture rather than adding an external viewer.
 - **After any change**, run `./run.sh test` (inside salloc). If an `envs/` file changed, run
   `./run.sh setup` first.
 
