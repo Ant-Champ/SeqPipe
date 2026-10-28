@@ -158,10 +158,11 @@ rule find_cassette_insertions:
         max_span    = config.get("cassette_max_span", 20000),
         min_segment = _cassette_param("min_segment"),
         cluster_tol = _cassette_param("cluster_tol"),
-        min_clip    = config.get("cassette_min_clip", 12),
+        min_clip    = config.get("cassette_min_clip", 20),
         mate_window = config.get("cassette_mate_window", 1000),
         hot_gap     = config.get("cassette_hotspot_gap", 1000),
         hot_min     = config.get("cassette_hotspot_min_reads", 3),
+        hot_min_j   = config.get("cassette_hotspot_min_junction_reads", 2),
     conda:
         "../envs/regions.yaml"
     shell:
@@ -173,7 +174,7 @@ rule find_cassette_insertions:
         "--out-counts {output.counts} --out-depth {output.depth} --fasta {input.ref} "
         "--min-clip {params.min_clip} --mate-window {params.mate_window} "
         "--out-hotspots {output.hotspots} --hotspot-gap {params.hot_gap} "
-        "--hotspot-min-reads {params.hot_min} > {log} 2>&1"
+        "--hotspot-min-reads {params.hot_min} --hotspot-min-junction-reads {params.hot_min_j} > {log} 2>&1"
 
 
 rule annotate_cassette_tables:

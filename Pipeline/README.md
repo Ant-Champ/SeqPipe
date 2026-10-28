@@ -537,12 +537,15 @@ Coordinates are on the genome, 0-based like the other region tables. Each table 
 | table | columns |
 |---|---|
 | `cassette_insertions` | contig, start, end, length, status, cassette, orientation, n_reads_left, n_reads_right, left_junction, right_junction |
-| `cassette_hotspots` | contig, start, end, length, status (`hotspot`), cassette, n_reads, n_mates, n_genome_clip, n_cassette_clip, n_split, junctions (`pos:reads`, top 3) |
+| `cassette_hotspots` | contig, start, end, length, status (`hotspot`, or `shared_end`: only sequence the cassettes share, e.g. the FRT scar of an earlier deletion), cassette, n_reads, n_mates, n_genome_clip, n_cassette_clip, n_split, junctions (`pos:reads`, top 3) |
 
-**Hotspots** follow every read on a cassette back to the genome: its mate (mapped uniquely on
-the genome), its soft-clipped bases (found exactly once in the genome), and the genome reads
-clipped into a cassette. Evidence closer than `cassette_hotspot_gap` bp is one hotspot; a hotspot
-needs `cassette_hotspot_min_reads` reads. A Keio replacement gives one hotspot per side when the
+**Hotspots** follow every read on a cassette back to the genome: its mate (both mates mapped
+uniquely), its soft-clipped bases (≥ 20 bp, found exactly once in the genome), and the genome
+reads clipped into a cassette. Evidence closer than `cassette_hotspot_gap` bp is one hotspot; a
+hotspot needs `cassette_hotspot_min_reads` reads, of which `cassette_hotspot_min_junction_reads`
+cross a junction (a few chimeric read pairs are not a hotspot). A hotspot where almost no read
+maps uniquely on a cassette is labelled `shared_end`: only the sequence cassettes share is
+there, e.g. the FRT scar left by an earlier deletion in a double mutant. A Keio replacement gives one hotspot per side when the
 replaced gene is longer than the gap. Hotspots are reported even when no precise left/right junction pair
 is found, and each one gets a picture (`run_hotspot_pictures`): genes, depth, and the reads
 stacked as in a genome browser, coloured by evidence (soft clip, mate on a cassette, split to a
@@ -601,8 +604,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_mapq` | 20 | evidence below this mapping quality cannot name the cassette |
 | `cassette_min_reads` | 2 | minimum reads for a junction |
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
-| `cassette_min_clip` | 12 | short reads: a uniquely mapped genome read whose soft clip (≥ this) continues into a cassette is a junction read (most junction reads are only clipped, not split) |
+| `cassette_min_clip` | 20 | a soft clip (≥ this) that continues into a cassette, or a cassette read's clip found once in the genome, is a junction read (most junction reads are only clipped, not split). Shorter clips match a bacterial genome by chance |
 | `cassette_hotspot_gap`, `cassette_hotspot_min_reads` | 1000, 3 | hotspots: merge evidence closer than this; minimum reads per hotspot (each gets a picture) |
+| `cassette_hotspot_min_junction_reads` | 2 | minimum reads crossing a junction (clip / split) in a hotspot: mates alone (chimeric pairs) are not a hotspot |
 | `cassette_mate_window` | 1000 | short reads: when the junction reads only hit the ends cassettes share, the read pairs within this distance (genome mate) whose other mate is unique on a cassette name it |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `picture_flank` | 1000 | bp shown on each side of a hotspot in its picture |
