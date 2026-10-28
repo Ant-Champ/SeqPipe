@@ -611,6 +611,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `picture_flank` | 1000 | bp shown on each side of a hotspot in its picture |
 | `picture_max_view`, `picture_max_per_sample` | 10000, 50 | widest picture (a longer hotspot is shown around its best junction); most pictures per sample |
+| `picture_debug` | false | also write `<picture>.png.reads.tsv`: every read fetched for the picture (name, flag, MAPQ, position, CIGAR, mate contig, SA, colour, drawn or not) |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
 | `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
 | `report_embed_pictures` | true | put the hotspot pictures inside `report.html` (false: link to the PNG files) |
@@ -637,6 +638,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |
 | reads on a cassette (`cassette_counts.tsv`) but no insertion site | read `<sample>/logs/find_cassette_insertions.log`: `evidence:` = junction reads found, `mate links` = genome positions whose mate is on a cassette. Mate links but no junction → send the log; no mate links at all → the cassette is not next to the reference genome (on a plasmid, or the sample has another reference) |
+| a hotspot picture looks wrong / empty, or takes long | `<sample>/cassettes/pictures/pictures_debug.tsv`: one row per picture with the window drawn, whether the contig is in each BAM, reads fetched / drawn by colour, depth, seconds and any error; `<sample>/logs/cassette_pictures.log` shows each step as it runs. For the reads themselves set `picture_debug: true` and rerun with `--forcerun cassette_pictures` |
 | no hotspot pictures, no error | `run_hotspot_pictures` is `false` (the report says "Pictures are off"). Set it to `true` (and `run_cassette_search: true`) |
 | `WARNING: config key run_igv_snapshots is now called run_hotspot_pictures` (or `igv_flank`, `report_embed_igv`) | an older config: rename the key (the old value is still used meanwhile) |
 | `WARNING: config key(s) igv_exe, … are no longer used` | IGV was removed: delete those lines |

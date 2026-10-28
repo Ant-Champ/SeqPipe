@@ -19,10 +19,20 @@ supported junction (else its middle), and the picture says so. At most
 One PNG per region in --outdir: NN_<status>_<cassette>_<contig>_<start>-<end>.png
 (1-based coordinates in the name). No region -> NO_CASSETTE_INSERTIONS.txt.
 
+Debugging: pictures_debug.tsv in --outdir always has one row per region (window
+drawn, contig found in each BAM, reads fetched / drawn by kind, rows, depth
+min / median / max, features shown, seconds, png or the error). A region that
+fails is logged with its traceback and the others are still drawn. --debug
+also writes <png>.reads.tsv: every read fetched (name, flag, MAPQ, position,
+CIGAR, mate, SA, kind, drawn or not).
+
 Needs pysam, matplotlib, biopython.
 """
 import argparse
 import re
+import sys
+import time
+import traceback
 from pathlib import Path
 
 import matplotlib
@@ -88,8 +98,10 @@ def stack(reads, max_rows):
     return placed, len(ends)
 
 
-def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample):
+def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample, reads_tsv=None):
+    """Draw one region; returns the debug statistics of what was found / drawn."""
     contig = reg["contig"]
+    st = {"in_all_bam": contig in all_bam.references, "in_cassette_bam": contig in cas_bam.references}
     # depth (all reads vs genome), like samtools depth
     depth = [0] * (b - a)
     if contig in all_bam.references:
@@ -113,8 +125,27 @@ def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample):
             reads.append(dict(start=r.reference_start, end=r.reference_end, kind=kind,
                               lclip=ct[0][1] if ct[0][0] == 4 else 0,
                               rclip=ct[-1][1] if ct[-1][0] == 4 else 0,
-                              rev=r.is_reverse))
+                              rev=r.is_reverse,
+                              dbg=(r.query_name, r.flag, r.mapping_quality, r.cigarstring,
+                                   r.next_reference_name if r.is_paired else ".",
+                                   r.get_tag("SA") if r.has_tag("SA") else ".")
+                              if reads_tsv else None))
     placed, nrows = stack(reads, args.max_rows)
+    drawn = {id(r) for _, r in placed}
+    sd = sorted(depth)
+    st.update(reads_fetched=len(reads), reads_drawn=len(placed), rows=nrows,
+              depth_min=sd[0] if sd else 0, depth_median=sd[len(sd) // 2] if sd else 0,
+              depth_max=sd[-1] if sd else 0,
+              features=sum(1 for s_, e_, _, _ in feats.get(contig, []) if e_ >= a and s_ <= b),
+              **{f"n_{k}": sum(1 for r in reads if r["kind"] == k) for k in ("read", "lowq", "mate", "split")},
+              n_clipped=sum(1 for r in reads if r["lclip"] or r["rclip"]))
+    if reads_tsv:
+        with open(reads_tsv, "w") as fh:
+            fh.write("name\tflag\tmapq\tstart\tend\tcigar\tmate_contig\tSA\tkind\tdrawn\n")
+            for r in reads:
+                n, fl, mq, cg, mc, sa = r["dbg"]
+                fh.write(f"{n}\t{fl}\t{mq}\t{r['start']}\t{r['end']}\t{cg}\t{mc}\t{sa}\t{r['kind']}\t"
+                         f"{'yes' if id(r) in drawn else 'no'}\n")
 
     h_reads = max(1.2, 0.07 * nrows)
     fig = plt.figure(figsize=(14, 2.4 + h_reads))
@@ -186,6 +217,7 @@ def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample):
         ax_r.text(a, 0, f" {len(reads) - len(placed)} more reads not shown", fontsize=7, va="bottom")
     fig.savefig(out_png, dpi=args.dpi, bbox_inches="tight")
     plt.close(fig)
+    return st
 
 
 def main():
@@ -203,6 +235,7 @@ def main():
     ap.add_argument("--max-view", type=int, default=10000, help="widest view drawn (bp) [10000]")
     ap.add_argument("--max-pictures", type=int, default=50, help="most regions drawn [50]")
     ap.add_argument("--dpi", type=int, default=110)
+    ap.add_argument("--debug", action="store_true", help="also write <png>.reads.tsv (every read fetched)")
     args = ap.parse_args()
 
     import pysam
@@ -212,15 +245,22 @@ def main():
     if not regions:
         (out / "NO_CASSETTE_INSERTIONS.txt").write_text("No cassette hotspot / insertion site was found.\n")
         return
+    import matplotlib as _mpl
+    print(f"snapshot_regions: {len(regions)} region(s) in {args.regions}; pysam {pysam.__version__}, "
+          f"matplotlib {_mpl.__version__}, python {sys.version.split()[0]}", flush=True)
     feats = features(args.genbank)
     all_bam = pysam.AlignmentFile(args.all_bam)
     cas_bam = pysam.AlignmentFile(args.cassette_bam)
     lens = dict(zip(all_bam.references, all_bam.lengths))
+    print(f"all-bam contigs: {', '.join(all_bam.references)}", flush=True)
+    print(f"cassette-bam contigs: {', '.join(cas_bam.references)}", flush=True)
+    print(f"genbank records with features: {', '.join(f'{k} ({len(v)})' for k, v in feats.items())}", flush=True)
     if len(regions) > args.max_pictures:
         keep = sorted(regions, key=lambda r: -int(r["row"].get("n_reads", 0) or 0))[:args.max_pictures]
         print(f"WARNING: {len(regions)} regions, drawing the {args.max_pictures} with most reads "
               f"(--max-pictures)")
         regions = [r for r in regions if r in keep]
+    debug_rows = []
     for i, reg in enumerate(regions, 1):
         a = max(0, reg["start"] - args.flank)
         b = min(lens.get(reg["contig"], reg["end"] + args.flank), reg["end"] + args.flank)
@@ -231,8 +271,39 @@ def main():
         label = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{reg['status']}_{reg['cassette']}").strip("_")
         tag = re.sub(r"[^A-Za-z0-9._-]+", "_", reg["contig"])
         png = out / f"{i:02d}_{label}_{tag}_{reg['start'] + 1}-{reg['end']}.png"
-        draw(reg, a, b, args, feats, all_bam, cas_bam, set(args.cassettes), png, args.sample)
-        print(f"-> {png}")
+        print(f"[{i}/{len(regions)}] {reg['contig']}:{reg['start']}-{reg['end']} ({reg['status']} "
+              f"{reg['cassette']}): drawing {reg['contig']}:{a}-{b} ({b - a:,} bp)", flush=True)
+        t0 = time.time()
+        row = dict(n=i, contig=reg["contig"], start=reg["start"], end=reg["end"], status=reg["status"],
+                   cassette=reg["cassette"], view_start=a, view_end=b, view_bp=b - a,
+                   junctions=",".join(f"{p}:{n}" for p, n in reg["junctions"]) or ".")
+        try:
+            row.update(draw(reg, a, b, args, feats, all_bam, cas_bam, set(args.cassettes), png, args.sample,
+                            reads_tsv=str(png) + ".reads.tsv" if args.debug else None))
+            row["png"], row["error"] = png.name, "."
+            print(f"    {row['reads_fetched']} reads fetched, {row['reads_drawn']} drawn in {row['rows']} rows, "
+                  f"depth {row['depth_min']}-{row['depth_max']} (median {row['depth_median']}); "
+                  f"{time.time() - t0:.1f} s -> {png}", flush=True)
+            if not row["in_all_bam"] or not row["in_cassette_bam"]:
+                print(f"    WARNING: contig {reg['contig']} missing from "
+                      f"{'the all-reads BAM' if not row['in_all_bam'] else 'the genome+cassettes BAM'}",
+                      flush=True)
+        except Exception as err:                    # one bad region must not stop the others
+            row["png"], row["error"] = ".", f"{type(err).__name__}: {err}"
+            print(f"    ERROR: {row['error']}", flush=True)
+            traceback.print_exc(file=sys.stdout)
+            plt.close("all")
+        row["seconds"] = f"{time.time() - t0:.1f}"
+        debug_rows.append(row)
+    cols = ["n", "contig", "start", "end", "status", "cassette", "view_start", "view_end", "view_bp",
+            "junctions", "in_all_bam", "in_cassette_bam", "reads_fetched", "reads_drawn", "rows", "n_read",
+            "n_lowq", "n_mate", "n_split", "n_clipped", "depth_min", "depth_median", "depth_max",
+            "features", "seconds", "png", "error"]
+    with open(out / "pictures_debug.tsv", "w") as fh:
+        fh.write("\t".join(cols) + "\n")
+        for r in debug_rows:
+            fh.write("\t".join(str(r.get(c, ".")) for c in cols) + "\n")
+    print(f"-> {out / 'pictures_debug.tsv'}")
 
 
 if __name__ == "__main__":
