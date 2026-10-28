@@ -1,0 +1,6 @@
+channels: [conda-forge, bioconda]
+dependencies:
+  - python=3.12
+  - biopython
+  - pysam>=0.21
+  - matplotlib-base

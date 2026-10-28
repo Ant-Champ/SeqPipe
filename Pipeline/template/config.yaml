@@ -26,7 +26,7 @@ run_multimer_analysis : true    # multimer / concatemer detection (ONT samples o
 run_denovo_assembly   : false   # ONT: Flye       | short reads: Unicycler
 run_plasmid_screen    : false   # map reads against a shared panel of plasmids (plasmid_panel_dir)
 run_cassette_search   : false   # where the cassettes of cassette_dir are inserted in the genome (all samples, all cassettes)
-run_igv_snapshots     : false   #   + IGV pictures of each insertion site (needs igv_exe and xvfb-run)
+run_igv_snapshots     : false   #   + a picture of each cassette hotspot (see snapshot_tool)
 run_html_report       : true    # <out_dir>/report.html: every result by sample / by analysis, coverage plots, IGV pictures
 
 # --- general ------------------------------------------------------------
@@ -169,7 +169,13 @@ cassette_min_segment_short : 30
 cassette_cluster_tol_ont   : 20
 cassette_cluster_tol_short : 10
 
-# IGV launcher (only for run_igv_snapshots), e.g. "/home/<you>/softwares/igv/igv.sh"
+# Pictures (run_igv_snapshots): snapshot_tool
+#   python : IGV-like view drawn by the pipeline (matplotlib): genes, depth, reads with
+#            soft clips / mates on a cassette / split reads. Works on any compute node.
+#   igv    : IGV itself (igv_exe below); needs xvfb-run and the X11 libraries of IGV's
+#            Java on the compute node (often missing on clusters: "loadLibrary" error).
+snapshot_tool : "python"
+# IGV launcher (only for snapshot_tool: igv), e.g. "/home/<you>/softwares/igv/igv.sh"
 igv_flank   : 1000   # bp shown on each side of an insertion site
 igv_exe     : ""
 igv_heap_mb : 4000   # Java heap given to IGV
@@ -190,5 +196,6 @@ report_embed_igv : true   # IGV pictures inside report.html (false: links to the
 #   annotate_regions: annotate_regions.py coverage_summary: aggregate_coverage.1.py
 #   find_cassette_insertions: find_cassette_insertions.py
 #   run_igv_snapshots: run_igv_snapshots.py  mappability: mappability.py
+#   snapshot_regions: snapshot_regions.py
 script_dir : ""
 script: {}               # e.g.  script: {simplify: "simplify.5.py"}
