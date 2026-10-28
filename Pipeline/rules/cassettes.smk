@@ -223,10 +223,13 @@ if RUN_PICTURES:
             cassettes = " ".join(c["name"] for c in CASSETTES),
             flank     = config.get("picture_flank", 1000),
             min_mapq  = config.get("cassette_min_mapq", 20),
+            max_view  = config.get("picture_max_view", 10000),
+            max_pics  = config.get("picture_max_per_sample", 50),
         conda:
             "../envs/snapshots.yaml"
         shell:
             "python {params.exe} --regions {input.regions} --all-bam {input.all_bam} "
             "--cassette-bam {input.cassette_bam} --genbank {input.gb} --cassettes {params.cassettes} "
             "--outdir {output.pictures} --sample {wildcards.sample} --flank {params.flank} "
-            "--min-mapq {params.min_mapq} > {log} 2>&1"
+            "--min-mapq {params.min_mapq} --max-view {params.max_view} "
+            "--max-pictures {params.max_pics} > {log} 2>&1"

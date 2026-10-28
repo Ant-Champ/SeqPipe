@@ -606,6 +606,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_mate_window` | 1000 | short reads: when the junction reads only hit the ends cassettes share, the read pairs within this distance (genome mate) whose other mate is unique on a cassette name it |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `picture_flank` | 1000 | bp shown on each side of a hotspot in its picture |
+| `picture_max_view`, `picture_max_per_sample` | 10000, 50 | widest picture (a longer hotspot is shown around its best junction); most pictures per sample |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
 | `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
 | `report_embed_pictures` | true | put the hotspot pictures inside `report.html` (false: link to the PNG files) |

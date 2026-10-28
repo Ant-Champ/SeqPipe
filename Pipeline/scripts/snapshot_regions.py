@@ -13,6 +13,9 @@ For each region (--regions: '#' header, contig start end length status cassette
     to a cassette (SA tag); at most --max-rows rows
   * dashed lines at the junction positions of the table's 'junctions' column
     (pos:reads), if there is one.
+The view is at most --max-view bp: a longer region is shown around its most
+supported junction (else its middle), and the picture says so. At most
+--max-pictures regions are drawn (the ones with most reads first).
 One PNG per region in --outdir: NN_<status>_<cassette>_<contig>_<start>-<end>.png
 (1-based coordinates in the name). No region -> NO_CASSETTE_INSERTIONS.txt.
 
@@ -87,12 +90,12 @@ def stack(reads, max_rows):
 
 def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample):
     contig = reg["contig"]
-    # depth (all reads vs genome)
+    # depth (all reads vs genome), like samtools depth
     depth = [0] * (b - a)
     if contig in all_bam.references:
-        for col in all_bam.pileup(contig, a, b, truncate=True, min_base_quality=0,
-                                  stepper="nofilter", ignore_orphans=False):
-            depth[col.reference_pos - a] = col.get_num_aligned()
+        cov = all_bam.count_coverage(contig, a, b, quality_threshold=0,
+                                     read_callback=lambda r: not (r.flag & 0x704))
+        depth = [sum(x) for x in zip(*cov)]
     # reads (genome + cassettes alignment)
     reads = []
     if contig in cas_bam.references:
@@ -171,8 +174,10 @@ def draw(reg, a, b, args, feats, all_bam, cas_bam, cass_set, out_png, sample):
 
     counts = "  ".join(f"{k}={reg['row'][k]}" for k in ("n_reads", "n_mates", "n_genome_clip",
                                                        "n_cassette_clip", "n_split") if k in reg["row"])
+    view = "" if (a <= reg["start"] and b >= reg["end"]) else \
+        f"   (view {a + 1:,}-{b:,} of a {reg['end'] - reg['start']:,} bp hotspot)"
     fig.suptitle(f"{sample}  {reg['cassette']}  {reg['status']}  {contig}:{reg['start'] + 1:,}-{reg['end']:,}"
-                 f"   {counts}", fontsize=10, x=0.01, y=0.99, ha="left")
+                 f"   {counts}{view}", fontsize=10, x=0.01, y=0.99, ha="left")
     handles = [Rectangle((0, 0), 1, 1, color=COL[k]) for k in ("read", "lowq", "clip", "mate", "split")]
     fig.legend(handles, ["read", f"MAPQ < {args.min_mapq}", "soft clip", "mate on a cassette",
                          "split to a cassette"], loc="lower right", fontsize=7, ncol=5, frameon=False,
@@ -195,6 +200,8 @@ def main():
     ap.add_argument("--flank", type=int, default=1000)
     ap.add_argument("--min-mapq", type=int, default=20)
     ap.add_argument("--max-rows", type=int, default=150)
+    ap.add_argument("--max-view", type=int, default=10000, help="widest view drawn (bp) [10000]")
+    ap.add_argument("--max-pictures", type=int, default=50, help="most regions drawn [50]")
     ap.add_argument("--dpi", type=int, default=110)
     args = ap.parse_args()
 
@@ -209,9 +216,18 @@ def main():
     all_bam = pysam.AlignmentFile(args.all_bam)
     cas_bam = pysam.AlignmentFile(args.cassette_bam)
     lens = dict(zip(all_bam.references, all_bam.lengths))
+    if len(regions) > args.max_pictures:
+        keep = sorted(regions, key=lambda r: -int(r["row"].get("n_reads", 0) or 0))[:args.max_pictures]
+        print(f"WARNING: {len(regions)} regions, drawing the {args.max_pictures} with most reads "
+              f"(--max-pictures)")
+        regions = [r for r in regions if r in keep]
     for i, reg in enumerate(regions, 1):
         a = max(0, reg["start"] - args.flank)
         b = min(lens.get(reg["contig"], reg["end"] + args.flank), reg["end"] + args.flank)
+        if b - a > args.max_view:                   # long hotspot: around its best junction
+            c = reg["junctions"][0][0] if reg["junctions"] else (reg["start"] + reg["end"]) // 2
+            a = max(0, c - args.max_view // 2)
+            b = min(lens.get(reg["contig"], a + args.max_view), a + args.max_view)
         label = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{reg['status']}_{reg['cassette']}").strip("_")
         tag = re.sub(r"[^A-Za-z0-9._-]+", "_", reg["contig"])
         png = out / f"{i:02d}_{label}_{tag}_{reg['start'] + 1}-{reg['end']}.png"

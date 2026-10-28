@@ -172,6 +172,8 @@ cassette_cluster_tol_short : 10
 # Hotspot pictures (run_hotspot_pictures): drawn by scripts/snapshot_regions.py
 # (matplotlib): genes, depth, reads with soft clips / mates on a cassette / split reads.
 picture_flank : 1000   # bp shown on each side of a hotspot
+picture_max_view : 10000       # widest picture (bp): a longer hotspot is shown around its best junction
+picture_max_per_sample : 50    # most pictures per sample (hotspots with most reads first)
 
 # --- HTML report (run_html_report) ----------------------------------------
 report_max_bins  : 20000  # depth points per replicon in the plots (4.6 Mb genome -> 230 bp per point)
