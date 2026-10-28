@@ -118,7 +118,8 @@ def _find_sequences(folder):
         stem = os.path.splitext(os.path.basename(path))[0]
         recs = list(SeqIO.parse(path, fmt))
         for i, rec in enumerate(recs):
-            name = stem if len(recs) == 1 else f"{stem}_{rec.id}"
+            rid = rec.id if re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*$", rec.id or "") else str(i + 1)
+            name = stem if len(recs) == 1 else f"{stem}_{rid}"
             found.append({"name": re.sub(r"[^\w.-]", "_", name), "path": path, "format": fmt, "index": i})
     dups = sorted({s["name"] for s in found if [t["name"] for t in found].count(s["name"]) > 1})
     if dups:

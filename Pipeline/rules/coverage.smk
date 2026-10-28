@@ -42,7 +42,9 @@ if RUN_MAPPABILITY and SR_SAMPLES:
         """Simulated perfect PE reads from the reference, mapped back with bwa-mem2:
         bases they cannot cover uniquely (MAPQ < min_mapq) = unmappable."""
         input:
-            gb = lambda wc: REF_KEY_PATH[wc.ref],
+            # the staged copy of one sample using it (usable contig names, as the BAMs)
+            gb = lambda wc: OUT_DIR + "{s}/{s}.ref.gb".format(
+                s=next(s for s, k in REF_KEYS.items() if k == wc.ref)),
         output:
             bed = MAPPABILITY_DIR + "{ref}.pe{read_len}_ins{ins}_q{mapq}.unmappable.bed",
         wildcard_constraints:

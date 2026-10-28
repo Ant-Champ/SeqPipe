@@ -352,6 +352,10 @@ def run(args):
             print(f"find_cassette_insertions: warning: cassette {c} not in BAM", file=sys.stderr)
     args.cass_len = lens
     genome = [c for c in refs if c not in cass_set]
+    if any(c in (".", "*") for c in refs):
+        sys.exit("find_cassette_insertions: a contig is named '.' or '*': htslib reads it as 'the "
+                 "whole file' (cassette reads would count as genome reads). Rerun the pipeline from "
+                 "the start: the staged reference now renames it.")
 
     genome_seqs = _read_fasta(args.fasta, set(genome)) if args.fasta else {}
     cass_clip_events, kmer_cache = [], {}

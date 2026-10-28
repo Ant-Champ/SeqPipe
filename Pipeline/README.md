@@ -254,6 +254,12 @@ source of the gene annotation, so they must contain the features (CDS, genes, �
 Replicon names in every output table are the GenBank `VERSION` (e.g. `NC_000913.3`). References
 with several records (chromosome + plasmids) are fine.
 
+Files exported by SnapGene, Benchling and similar tools often have `ACCESSION .` / `VERSION .`,
+which would name the replicon `.`, and tools that read BAM files take a contig called `.` as "the
+whole file". Such a name is replaced by the `LOCUS` name (else `contig1`, `contig2`…) when the
+reference is copied into `<out_dir>/<sample>/`; `<sample>/logs/stage_ref.log` lists any renaming.
+NCBI-style files keep their names. Both kinds can be mixed in one run.
+
 ### 3.3 The config
 
 Edit `config.yaml`. The first part is all you normally touch:
@@ -632,6 +638,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `Directory cannot be locked` | a previous run crashed: `run.sh <config> --unlock`, then run again |
 | a step failed | read `<out_dir>/<sample>/logs/<step>.log`. Fix, then run the same command again |
 | allocation time ran out | new `salloc`, same command. Unfinished jobs are redone (`--rerun-incomplete` is on) |
+| contig called `.` in old results, hotspot at the very start of the genome (thrA) in every sample, pictures that never finish | a GenBank file with `VERSION .` (SnapGene / Benchling export), run before this was handled: start a fresh `out_dir` (contig names change, so everything is redone) |
 | `features` all `.` in annotated tables | the GenBank file has no features, or they are only of a skipped type (`annotate_skip_types`) |
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |

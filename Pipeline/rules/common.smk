@@ -45,6 +45,34 @@ def depth_checks():
         expand(OUT_DIR + "{sample}/qc/{sample}.depth_check.tsv", sample=SAMPLE_NAMES)
 
 
+def safe_record_names(records):
+    """Give every GenBank record a usable contig name, in place. GenBank files
+    exported by SnapGene / Benchling often have 'ACCESSION .' / 'VERSION .', so
+    Biopython names the record '.' -- and htslib reads a contig called '.' as
+    "the whole file": every BAM lookup on it returns all reads (cassette reads
+    counted as genome reads, pictures that never finish). A bad id is replaced
+    by the LOCUS name, else contig<N>; names are made unique. Returns
+    [(old, new)] for the names that changed."""
+    import re
+    ok = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*$")
+    used, changed = set(), []
+    for i, rec in enumerate(records, 1):
+        name = rec.id
+        if not ok.match(name or ""):
+            name = rec.name if ok.match(rec.name or "") else re.sub(r"[^A-Za-z0-9._-]", "_", rec.name or "")
+            if not ok.match(name):
+                name = f"contig{i}"
+        base, k = name, 2
+        while name in used:
+            name, k = f"{base}_{k}", k + 1
+        used.add(name)
+        if name != rec.id:
+            changed.append((rec.id, name))
+        rec.id = rec.name = name
+        rec.annotations["accessions"] = [name]
+    return changed
+
+
 def raw_reads(sample):
     """Raw input FASTQ(s) of a sample, as written in the sheet: [reads] for ONT, [R1, R2] for short reads."""
     r = [samples.at[sample, "reads1"]]
@@ -128,12 +156,26 @@ rule stage_reads_sr:
 
 
 rule stage_ref:
+    """The sample's GenBank reference, with usable contig names (see
+    safe_record_names): every later step takes its contig names from here."""
     input:
         sample_ref_gb,
     output:
         OUT_DIR + "{sample}/{sample}.ref.gb",
-    shell:
-        r"""cp -- "{input}" "{output}" """
+    log:
+        OUT_DIR + "{sample}/logs/stage_ref.log",
+    run:
+        import warnings
+        from Bio import SeqIO, BiopythonWarning
+        records = list(SeqIO.parse(input[0], "genbank"))
+        changed = safe_record_names(records)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", BiopythonWarning)     # long LOCUS names
+            SeqIO.write(records, output[0], "genbank")
+        with open(log[0], "w") as fh:
+            fh.write(f"{len(records)} record(s): {', '.join(r.id for r in records)}\n")
+            for old, new in changed:
+                fh.write(f"renamed contig '{old}' -> '{new}' (unusable name in {input[0]})\n")
 
 
 rule genbank_to_fasta:

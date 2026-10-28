@@ -252,6 +252,11 @@ def main():
     all_bam = pysam.AlignmentFile(args.all_bam)
     cas_bam = pysam.AlignmentFile(args.cassette_bam)
     lens = dict(zip(all_bam.references, all_bam.lengths))
+    bad = [c for c in set(all_bam.references) | set(cas_bam.references) if c in (".", "*")]
+    if bad:
+        sys.exit(f"snapshot_regions: contig(s) named {bad} in the BAMs: htslib reads them as 'the whole "
+                 f"file', so every region would load all reads. Rerun the pipeline from the start "
+                 f"(the staged reference now renames them).")
     print(f"all-bam contigs: {', '.join(all_bam.references)}", flush=True)
     print(f"cassette-bam contigs: {', '.join(cas_bam.references)}", flush=True)
     print(f"genbank records with features: {', '.join(f'{k} ({len(v)})' for k, v in feats.items())}", flush=True)
