@@ -56,7 +56,6 @@ def _report_inputs(wildcards=None):
     if RUN_PLASMID_SCREEN:
         d["plasmid_cov"] = expand(OUT_DIR + "{sample}/{sample}.plasmid_coverage.tsv", sample=OK)
     if RUN_CASSETTES:
-        d["cassette_trims"] = OUT_DIR + "cassettes/cassette_trims.tsv"
         d["cassette_more"] = expand(OUT_DIR + "{sample}/annotated/{sample}.cassette_junctions.annotated.tsv",
                                     sample=OK) \
                            + expand(OUT_DIR + "{sample}/annotated/{sample}.cassette_hotspots.annotated.tsv",

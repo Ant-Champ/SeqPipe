@@ -277,16 +277,10 @@ def gather_sample(s, out_dir, tg, embed_pictures):
     }
 
 
-def cassette_features(cassettes, trims_path=None):
+def cassette_features(cassettes):
     """{cassette name: [[start, end, strand, name, note], ...]} from the cassette
-    GenBank files (FASTA cassettes have none), in the coordinates of the cassette
-    as mapped (shifted by the genome-sequence ends trimmed off, cassette_trims.tsv)."""
+    GenBank files (FASTA cassettes have none)."""
     from Bio import SeqIO
-    trims = {}
-    if trims_path and os.path.isfile(trims_path):
-        with open(trims_path) as fh:
-            for row in csv.DictReader(fh, delimiter="\t"):
-                trims[row["cassette"]] = (int(row["trim_5"]), int(row["length"]) - int(row["trim_3"]))
     out = {}
     for c in cassettes:
         if c.get("format") != "genbank":
@@ -301,11 +295,7 @@ def cassette_features(cassettes, trims_path=None):
                 name = (q.get("gene") or q.get("label") or q.get("locus_tag") or q.get("name")
                         or q.get("product") or [f.type])[0]
                 note = (q.get("product") or q.get("note") or [f.type])[0]
-                t5, keep_end = trims.get(c["name"], (0, len(rec.seq)))
-                s0, e0 = max(int(f.location.start), t5), min(int(f.location.end), keep_end)
-                if e0 <= s0:
-                    continue                       # feature entirely in a trimmed end
-                feats.append([s0 - t5 + 1, e0 - t5,
+                feats.append([int(f.location.start) + 1, int(f.location.end),
                               1 if (f.location.strand or 1) > 0 else -1, name, str(note)[:80]])
             out[c["name"]] = feats
         except Exception as err:           # annotations are a nice-to-have
@@ -325,7 +315,7 @@ def main(samples, out_dir, toggles, embed_pictures, config, out_html, cassettes=
         "config": {k: v for k, v in sorted(config.items()) if isinstance(v, (str, int, float, bool))},
         "order": [s["sample_name"] for s in samples],
         "samples": {}, "genes": {}, "ref_of": {},
-        "cassette_genes": cassette_features(cassettes, os.path.join(out_dir, "cassettes", "cassette_trims.tsv")),
+        "cassette_genes": cassette_features(cassettes),
     }
     for s in samples:
         name = s["sample_name"]
