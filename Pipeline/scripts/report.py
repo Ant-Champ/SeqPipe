@@ -35,13 +35,14 @@ SECTIONS = [
      "seqkit stats of the raw and filtered reads; fastp report for short reads."),
     ("coverage",  "Alignment & coverage", None,
      "Depth along every replicon (drag on a plot to zoom, double-click to reset; "
-     "red = low-coverage region, green = cassette, orange = breakpoint, purple = indel, "
+     "red = low-coverage region, teal = high-coverage region, green = cassette, orange = breakpoint, purple = indel, "
      "black ticks = variants). samtools coverage per replicon and flagstat."),
     ("variants",  "Variants",  "variants",
      "Small variants against the reference (medaka for ONT, bcftools for short reads). "
      "Click a row to see it on the coverage plot."),
-    ("lowcov",    "Low-coverage regions", "coverage",
-     "Regions below the low-coverage threshold, with the genes they hit: deletions show up here."),
+    ("lowcov",    "Low / high coverage", "coverage",
+     "Regions below the low-coverage threshold (deletions) and above the high-coverage threshold "
+     "of their replicon (duplications, amplifications; fold ~2 = one extra copy), with the genes they hit."),
     ("sv",        "Large indels & breakpoints", "sv",
      "Large indels from CIGARs and clipped-read breakpoint clusters."),
     ("cassettes", "Cassette insertions", "cassettes",
@@ -199,6 +200,9 @@ def gather_sample(s, out_dir, tg, embed_igv):
         t = read_table(ann + ".low_coverage.annotated.tsv")
         add("lowcov", "Low-coverage regions", table=t)
         events += events_from(t, "lowcov", ["mean_depth"])
+        t = read_table(ann + ".high_coverage.annotated.tsv")
+        add("lowcov", "High-coverage regions", table=t)
+        events += events_from(t, "highcov", ["fold"])
     if tg.get("sv"):
         t = read_table(ann + ".indels.annotated.tsv")
         add("sv", "Large indels", table=t)
@@ -294,7 +298,7 @@ PAGE = r"""<!doctype html>
 <title>__TITLE__</title>
 <style>
 :root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5d8a;
- --depth:#4a7fb5;--low:rgba(214,64,52,.18);--lowedge:#d64034;--cas:#2e9e5b;--bp:#e08a1e;--indel:#8a4fc2;--var:#1d1d1b;
+ --depth:#4a7fb5;--low:rgba(214,64,52,.18);--lowedge:#d64034;--high:rgba(23,150,150,.2);--highedge:#179696;--cas:#2e9e5b;--bp:#e08a1e;--indel:#8a4fc2;--var:#1d1d1b;
  --gene:#9aa4ae;--good:#2e9e5b;--warn:#d9a21b;--bad:#d64034;--chip:#eef2f6}
 @media (prefers-color-scheme: dark){:root{--bg:#161615;--panel:#1f1f1e;--ink:#ecebe6;--muted:#9c9b95;--line:#33332f;
  --accent:#8db6e0;--depth:#6f9fd1;--low:rgba(240,100,90,.22);--var:#ecebe6;--gene:#6c7680;--chip:#26303a}}
@@ -458,7 +462,7 @@ function combined(secKey, title) {
 // ---------------------------------------------------------------- coverage plot
 const PLOTS = {};
 const TRACK = { depth: 120, ev: 18, gene: 30, axis: 18 };
-const EVCOL = { lowcov: "--lowedge", cassette: "--cas", breakpoint: "--bp", indel: "--indel", variant: "--var" };
+const EVCOL = { lowcov: "--lowedge", highcov: "--highedge", cassette: "--cas", breakpoint: "--bp", indel: "--indel", variant: "--var" };
 
 function plot(sample, contig) {
   const smp = D.samples[sample], dp = smp.depth[contig];
@@ -485,8 +489,8 @@ function plot(sample, contig) {
     const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, W, H);
     pos.textContent = `${contig}:${st.a.toLocaleString()}-${st.b.toLocaleString()} (${fmtBp(st.b - st.a + 1)})`;
     // low-coverage bands
-    g.fillStyle = css("--low");
-    for (const e of ev) if (e[0] === "lowcov" && e[3] >= st.a && e[2] <= st.b) g.fillRect(X(e[2]), 0, Math.max(2, X(e[3] + 1) - X(e[2])), TRACK.depth);
+    for (const e of ev) if ((e[0] === "lowcov" || e[0] === "highcov") && e[3] >= st.a && e[2] <= st.b) {
+      g.fillStyle = css(e[0] === "lowcov" ? "--low" : "--high"); g.fillRect(X(e[2]), 0, Math.max(2, X(e[3] + 1) - X(e[2])), TRACK.depth); }
     // depth (one value per pixel column: mean of the bins under it)
     g.fillStyle = css("--depth"); g.beginPath(); g.moveTo(0, TRACK.depth);
     for (let x = 0; x < W; x++) {
@@ -508,7 +512,7 @@ function plot(sample, contig) {
       g.fillStyle = css(EVCOL[e[0]]);
       if (e[0] === "variant") { g.fillRect(x0 - 0.5, y0, 2, 8); }
       else if (e[0] === "breakpoint") { g.globalAlpha = .8; g.fillRect(x0 - 1, 0, 2, TRACK.depth); g.globalAlpha = 1; g.fillRect(x0 - 2, y0, 4, TRACK.ev - 6); }
-      else if (e[0] === "lowcov") { g.fillRect(x0, y0 + 9, x1 - x0, 4); }
+      else if (e[0] === "lowcov" || e[0] === "highcov") { g.fillRect(x0, y0 + 9, x1 - x0, 4); }
       else { g.fillRect(x0, y0, x1 - x0, TRACK.ev - 6);
         if (e[0] === "cassette" && x1 - x0 > 60) { g.fillStyle = "#fff"; g.font = "10px system-ui"; g.fillText(e[4], x0 + 3, y0 + 9, x1 - x0 - 6); } }
     }
@@ -582,6 +586,7 @@ function tiles(s) {
     ["Mapped", r.pct_mapped && r.pct_mapped !== "NA" ? r.pct_mapped + " %" : "–"], ["Mean depth", big(r.mean_depth)],
     ["Min replicon breadth", r.min_replicon_breadth ? r.min_replicon_breadth + " %" : "–"],
     ["Variants", big(r.detected_mutations)], ["Low-coverage regions", big(r.low_cov_regions)],
+    ["High-coverage regions", big(r.high_cov_regions)],
     ["Large indels", big(r.large_indels)], ["Breakpoints", big(r.breakpoints)], ["Cassette sites", big(cas)],
     ["Multimer", big(r.multimer)], ["Assembly contigs", big(r.assembly_contigs)]];
   return $("div", { class: "tiles" }, T.filter(([k, v]) => (v !== "NA" && v !== "–") || ["Platform", "Reference"].includes(k))

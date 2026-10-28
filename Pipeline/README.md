@@ -377,7 +377,7 @@ Rule (step) names for `--forcerun` / `--until`:
 - **Staging and filtering:** `stage_reads_ont`, `stage_reads_sr`, `filter_reads_ont`, `filter_reads_sr`.
 - **Alignment:** `align_ont`, `align_sr`.
 - **Variants:** `variant_calling_ont`, `variant_calling_sr`, `filter_variants_ont`, `filter_variants_sr`, `id_gatc_variants`, `annotate_gatc_variants`.
-- **Coverage and SV scan:** `lowcov`, `sv_scan`, `annotate_low_coverage`, `annotate_sv`.
+- **Coverage and SV scan:** `lowcov` (low and high coverage), `sv_scan`, `annotate_coverage_regions`, `annotate_sv`.
 - **Other analyses:** `detect_multimers`, `assemble_ont`, `assemble_sr`, `plasmid_screen_align`, `cassette_align_ont`, `cassette_align_sr`, `find_cassette_insertions`.
 - **Summary and report:** `run_summary`, `depth_profile`, `html_report`.
 
@@ -399,7 +399,8 @@ Rule (step) names for `--forcerun` / `--until`:
     <sample>.simple.tsv               SNPs / small indels
     <sample>.annotated.gatc.simple.tsv  ... + NearGATC + gene annotation (+ multimer column, ONT)
     coverage/<sample>.coverage_summary.tsv   per replicon: mean/median depth, % zero, % low
-    annotated/<sample>.low_coverage.annotated.tsv
+    annotated/<sample>.low_coverage.annotated.tsv    deletions (with the genes hit)
+    annotated/<sample>.high_coverage.annotated.tsv   duplications / amplifications (fold vs replicon median)
     annotated/<sample>.indels.annotated.tsv
     annotated/<sample>.breakpoints.annotated.tsv
     <sample>.multimer.summary.tsv     ONT: multimer verdict
@@ -435,6 +436,7 @@ The coverage plots show depth along each replicon, with coloured marks:
 | Colour | Meaning |
 |---|---|
 | red band | low-coverage region |
+| teal band | high-coverage region (duplication) |
 | green | cassette insertion |
 | orange line | breakpoint |
 | purple | large indel |
@@ -470,7 +472,7 @@ there but could not be read, and the reason is in `logs/run_summary.log`.
 | `mean_depth` | mean aligned depth over the whole reference |
 | `min_replicon_breadth` | lowest % of a replicon covered. **A lost plasmid shows here as ~0** |
 | `detected_mutations` | rows in `simple.tsv` |
-| `low_cov_regions`, `large_indels`, `breakpoints` | rows in the annotated tables |
+| `low_cov_regions`, `high_cov_regions`, `large_indels`, `breakpoints` | rows in the annotated tables |
 | `multimer`, `multimer_copies`, `multimer_pct` | ONT multimer call |
 | `assembly_contigs`, `assembly_circular` | number of contigs / circular contigs (`skipped` if too little data) |
 | `cassette_insertions` | `cassette@contig:start-end[replaced genes]` per site, `;`-separated, `none` if no site. One-sided sites read `cassette@contig:pos(left_only)` |
@@ -484,6 +486,7 @@ or `.` if there are none.
 | table | columns |
 |---|---|
 | `low_coverage` | contig, start, end, length, mean_depth, min_depth |
+| `high_coverage` | contig, start, end, length, mean_depth, replicon_median, fold |
 | `indels` | contig, start, end, type (`INS`/`DEL`), n_reads, median_len, min_len, max_len, depth, frac_reads |
 | `breakpoints` | contig, start, end, side (`L`/`R` soft clip), n_reads, n_split, depth, frac_reads |
 
@@ -493,8 +496,15 @@ How to read them:
 - **A real deletion** shows as an `R` breakpoint and an `L` breakpoint on either side of a
   `low_coverage` region with `min_depth` 0.
 - **GC-extreme regions** give shallow but non-zero dips.
-- **Low-coverage threshold.** A base is "low" when its depth is below
-  `max(lowcov_min_depth, lowcov_frac × median depth)`.
+- **Low-coverage threshold.** It is relative, with a fixed floor: a base is "low" when its
+  depth is below `max(lowcov_min_depth, lowcov_frac × median depth)`, the median being taken
+  over the whole reference. With the defaults: median 80× → low below 20×; median 30× → low
+  below 10× (the floor). Only regions of at least `lowcov_min_len` bp are reported.
+- **A duplication** shows as a `high_coverage` region with `fold` ≈ 2 (≈ 3 for two extra
+  copies), often with breakpoints at its ends. The threshold is relative to the median of the
+  replicon the region is on, so a multicopy plasmid is not flagged as a whole (its copy number
+  is in `coverage_summary.tsv`). Short reads give noisier depth than ONT; raise
+  `highcov_min_len` if small GC-rich regions come up.
 
 `simple.tsv` columns are `CHROM POS REF ALT %Reads MutationType` (1-based `POS`). `%Reads` is the
 percentage of reads carrying the ALT allele.
@@ -539,7 +549,9 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `simplify_min_qual` | 50 | ONT variants: keep those in more than this % of reads (despite the name, not a QUAL) |
 | `bcftools_min_qual` | 30 | SR variants: minimum QUAL |
 | `lowcov_min_depth`, `lowcov_frac` | 10, 0.25 | "low" = depth < max(min_depth, frac × median) |
-| `lowcov_min_len`, `lowcov_merge_gap` | 20, 10 | minimum region length; merge regions closer than this |
+| `lowcov_min_len`, `lowcov_merge_gap` | 20, 10 | minimum region length (raise it, e.g. 500, to keep only large deletions); merge regions closer than this |
+| `highcov_frac`, `highcov_window` | 1.7, 100 | "high" = a window whose mean depth > frac × the median of its own replicon (duplications; fold ≈ 2 per extra copy) |
+| `highcov_min_len`, `highcov_merge_gap` | 1000, 300 | minimum high-coverage region length; merge regions closer than this |
 | `sv_scan.short.*`, `sv_scan.ont.*` | see file | min indel / soft-clip size, min supporting reads, clustering tolerance per read type |
 | `sv_ignore_contig_ends` | 10 | ignore breakpoints at the very ends of a replicon (circular origin) |
 | `multimer_*` | see file | multimer calling thresholds (ONT) |

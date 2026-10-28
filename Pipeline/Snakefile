@@ -270,7 +270,8 @@ def _rule_all_inputs():
     if RUN_GATC:
         d["annotated_gatc_align_snps"] = expand(OUT_DIR + "{sample}/{sample}.annotated.gatc.simple.tsv", sample=SAMPLE_NAMES)
     if RUN_COVERAGE:
-        d["low_coverage"] = expand(OUT_DIR + "{sample}/annotated/{sample}.low_coverage.annotated.tsv", sample=SAMPLE_NAMES)
+        d["coverage_regions"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{level}_coverage.annotated.tsv",
+                                       sample=SAMPLE_NAMES, level=["low", "high"])
     if RUN_SV:
         d["sv"] = expand(OUT_DIR + "{sample}/annotated/{sample}.{table}.annotated.tsv",
                          sample=SAMPLE_NAMES, table=["indels", "breakpoints"])

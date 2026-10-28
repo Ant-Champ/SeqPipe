@@ -26,7 +26,7 @@ COLUMNS = [
     "raw_reads", "raw_bases", "filt_reads", "filt_bases", "filt_N50",
     "ref_length", "ref_records", "coverage_approx",
     "pct_mapped", "mean_depth", "min_replicon_breadth",
-    "detected_mutations", "low_cov_regions", "large_indels", "breakpoints",
+    "detected_mutations", "low_cov_regions", "high_cov_regions", "large_indels", "breakpoints",
     "multimer", "multimer_copies", "multimer_pct",
     "assembly_contigs", "assembly_circular", "cassette_insertions",
 ]
@@ -227,6 +227,8 @@ def summarize_sample(s, out_dir, tg):
     if tg.get("coverage"):
         rec["low_cov_regions"] = try_(name, "low_coverage table", lambda: count_rows(
             os.path.join(d, "annotated", name + ".low_coverage.annotated.tsv")))
+        rec["high_cov_regions"] = try_(name, "high_coverage table", lambda: count_rows(
+            os.path.join(d, "annotated", name + ".high_coverage.annotated.tsv")))
     if tg.get("sv"):
         rec["large_indels"] = try_(name, "indels table", lambda: count_rows(
             os.path.join(d, "annotated", name + ".indels.annotated.tsv")))

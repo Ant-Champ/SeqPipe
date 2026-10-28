@@ -2,6 +2,8 @@
 # Run configuration -- copy this file into your run folder and edit it.
 #   cp <pipeline>/template/config.yaml  <run folder>/config.yaml
 # Paths: absolute paths are safest.
+# EVERY option of the pipeline is listed here, set to its default value
+# (a key left out of your config also takes this default).
 # ======================================================================
 
 # --- I/O paths --------------------------------------------------------
@@ -18,7 +20,7 @@ ref_dir      : "/path/to/run/genbank_files/"    # GenBank references (.gb), see 
 run_read_filtering    : true    # ONT: filtlong   | short reads: fastp
 run_variant_calling   : true    # ONT: medaka     | short reads: bcftools  -> <sample>.simple.tsv
 run_gatc_annotation   : true    #   + GATC-site and gene annotation (needs run_variant_calling)
-run_coverage_analysis : true    # coverage per replicon + annotated low-coverage regions
+run_coverage_analysis : true    # coverage per replicon + annotated low- and high-coverage regions
 run_sv_scan           : true    # large indels + breakpoints (deleted / moved regions), annotated
 run_multimer_analysis : true    # multimer / concatemer detection (ONT samples only)
 run_denovo_assembly   : false   # ONT: Flye       | short reads: Unicycler
@@ -55,12 +57,24 @@ bcftools_min_qual  : 30    # short reads (bcftools): minimum QUAL
 bcftools_min_baseq : 20
 bcftools_max_depth : 10000
 
-# --- low-coverage regions -------------------------------------------------
-# a base is "low" if depth < max(lowcov_min_depth, lowcov_frac x median depth)
-lowcov_min_depth : 10
-lowcov_frac      : 0.25
-lowcov_min_len   : 20     # bp
-lowcov_merge_gap : 10     # merge low regions closer than this (bp)
+# --- low-coverage regions (deletions) --------------------------------------
+# RELATIVE threshold with a fixed floor: a base is "low" if
+#   depth < max(lowcov_min_depth, lowcov_frac x median depth)
+# median depth = over the whole reference (all replicons together).
+# e.g. median 80x -> low below max(10, 20) = 20x ; median 30x -> below 10x.
+lowcov_min_depth : 10     # fixed floor (x)
+lowcov_frac      : 0.25   # fraction of the median depth
+lowcov_min_len   : 20     # report only regions at least this long (bp); e.g. 500 for gene-size deletions only
+lowcov_merge_gap : 10     # merge low regions closer than this (bp), before the length filter
+
+# --- high-coverage regions (duplications, amplifications) -----------------
+# The replicon is cut into highcov_window bp windows; a window is "high" if
+# its mean depth > highcov_frac x the median depth OF ITS OWN REPLICON (so a
+# multicopy plasmid is not flagged as a whole). fold ~2 = one extra copy.
+highcov_frac      : 1.7    # 1.7 catches a duplication (2x) despite depth noise
+highcov_window    : 100    # bp
+highcov_min_len   : 1000   # report only regions at least this long (bp)
+highcov_merge_gap : 300    # merge high regions closer than this (bp), before the length filter
 annotate_skip_types : "source,gene"   # GenBank feature types ignored when annotating
 
 # --- large indels / breakpoints (per read type) ---------------------------
@@ -80,12 +94,14 @@ sv_ignore_contig_ends : 10   # drop breakpoints this close to a contig end (read
 
 # --- multimer calling (ONT) -----------------------------------------------
 multimer_threads      : 4
+multimer_mem_mb       : 4000
 multimer_min_fraction : 0.02   # fraction of full-length reads that must be concatemeric
 multimer_min_reads    : 5
 multimer_junction_tol : 0.02   # junction slack, fraction of L (floor 50 bp)
 multimer_min_query_cov: 0.8
 multimer_length_cut   : 1.5    # read/L ratio above which a read is concatemeric
 multimer_extra_columns: false  # also add multimer_copies / multimer_pct to the annotated table
+multimer_column_name  : "multimer"   # name of the column added to the annotated variant table
 
 # --- de novo assembly -----------------------------------------------------
 # Samples with several replicons (chromosome + plasmid) give several contigs:
@@ -97,6 +113,7 @@ flye_min_coverage: 10            # skip (clearly-labelled empty result) below th
 unicycler_threads: 8
 unicycler_mem_mb : 16000
 unicycler_mode   : "normal"      # conservative | normal | bold
+unicycler_min_coverage: 10       # as flye_min_coverage, for short reads (R1 + R2 bases)
 
 # --- plasmid panel screening ----------------------------------------------
 # Folder of GenBank or FASTA files (.gb/.gbk/.genbank/.fasta/.fa/.fna), one
@@ -134,7 +151,15 @@ report_max_bins  : 20000  # depth points per replicon in the plots (4.6 Mb genom
 report_embed_igv : true   # IGV pictures inside report.html (false: links to the PNGs, smaller file)
 
 # --- analysis scripts (optional) -------------------------------------------
-# Scripts are taken from <pipeline>/scripts. To try another version of a
-# script, put it there and name it here, e.g.  simplify: "simplify.5.py"
+# Scripts are taken from <pipeline>/scripts (or script_dir if set). To try
+# another version of a script, put it there and name it under `script:`.
+# The keys and their default scripts:
+#   simplify: simplify.4.py               simplify_bcftools: simplify_bcftools.py
+#   id_gatc: id_GATC.2.py                 annotate: annotate.2.py
+#   multimer_flag: add_multimer_column.1.py   multimer: multimer.2.py
+#   lowcov: lowcov.py                     sv_scan: sv_scan.py
+#   annotate_regions: annotate_regions.py coverage_summary: aggregate_coverage.1.py
+#   find_cassette_insertions: find_cassette_insertions.py
+#   run_igv_snapshots: run_igv_snapshots.py
 script_dir : ""
-script: {}
+script: {}               # e.g.  script: {simplify: "simplify.5.py"}

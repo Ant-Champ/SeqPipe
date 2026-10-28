@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lowcov -- per-contig coverage summary + merged low-coverage regions.
+"""lowcov -- per-contig coverage summary + merged low- and high-coverage regions.
 
 Ported from alignqc.py (step_lowcov). Depth comes from `samtools depth -aa -Q
 <min-mapq>` (every position, including zeros and reference contigs with no
@@ -8,12 +8,21 @@ A base is "low" if depth < max(low_depth, low_frac * median depth); low bases
 closer than --low-merge-gap are merged and regions shorter than --low-min-len
 are dropped.
 
+High coverage (duplications, amplifications): the replicon is cut into
+--high-window bp windows; a window is "high" if its mean depth is above
+--high-frac x the median depth OF THAT REPLICON (so a multicopy plasmid is not
+flagged as a whole: its copy number is in the summary). High windows closer
+than --high-merge-gap are merged and regions shorter than --high-min-len are
+dropped. fold = region mean / replicon median (~2 for one extra copy).
+
 Coordinates are 0-based half-open (BED-like).
 
 --out-summary columns ('#' header line):
   #contig  length  mean_depth  median_depth  pct_zero  pct_low
 --out-low columns ('#' header line):
   #contig  start  end  length  mean_depth  min_depth
+--out-high columns ('#' header line):
+  #contig  start  end  length  mean_depth  replicon_median  fold
 
 Python >= 3.8; needs samtools on PATH.
 """
@@ -68,6 +77,22 @@ def low_regions(arr, thr, merge_gap, min_len):
     return [(s, e, tot / n, mn) for s, e, tot, n, mn in regions if e - s >= min_len]
 
 
+def high_regions(arr, median, frac, window, merge_gap, min_len):
+    """Merged high-depth windows of one contig -> [(start, end, mean)]."""
+    if median <= 0:
+        return []
+    thr, regions = frac * median, []            # [start, end]
+    for ws in range(0, len(arr), window):
+        w = arr[ws:ws + window]
+        if sum(w) / len(w) <= thr:
+            continue
+        if regions and ws - regions[-1][1] <= merge_gap:
+            regions[-1][1] = ws + len(w)
+        else:
+            regions.append([ws, ws + len(w)])
+    return [(s, e, sum(arr[s:e]) / (e - s)) for s, e in regions if e - s >= min_len]
+
+
 def run(args):
     with open(args.fai) as fai:
         genome_len = sum(int(l.split("\t")[1]) for l in fai if l.strip())
@@ -99,16 +124,18 @@ def run(args):
     thr = max(args.low_depth, args.low_frac * median)
     print(f"median depth={median}  low-coverage threshold=<{thr:.1f}")
 
-    for p in (args.out_summary, args.out_low):
+    for p in (args.out_summary, args.out_low, args.out_high):
         Path(p).parent.mkdir(parents=True, exist_ok=True)
 
     # ---- summary table
+    contig_median = {}
     with open(args.out_summary, "w") as out:
         out.write("#contig\tlength\tmean_depth\tmedian_depth\tpct_zero\tpct_low\n")
         for contig, arr in depth.items():
             n, h = len(arr), Counter(arr)
             low = sum(v for k, v in h.items() if k < thr)
-            out.write(f"{contig}\t{n}\t{sum(arr)/n:.1f}\t{_median_from_hist(h, n)}\t"
+            contig_median[contig] = _median_from_hist(h, n)
+            out.write(f"{contig}\t{n}\t{sum(arr)/n:.1f}\t{contig_median[contig]}\t"
                       f"{100*h[0]/n:.2f}\t{100*low/n:.2f}\n")
 
     # ---- pass 2: low regions, merging gaps <= low_merge_gap
@@ -119,6 +146,17 @@ def run(args):
                 out.write(f"{contig}\t{start}\t{end}\t{end-start}\t{mean:.1f}\t{mn}\n")
     print(f"-> {args.out_low}")
 
+    # ---- pass 3: high regions, against each replicon's own median
+    with open(args.out_high, "w") as out:
+        out.write("#contig\tstart\tend\tlength\tmean_depth\treplicon_median\tfold\n")
+        for contig, arr in depth.items():
+            med = contig_median[contig]
+            print(f"{contig}: median depth={med}  high-coverage threshold=>{args.high_frac * med:.1f}")
+            for start, end, mean in high_regions(arr, med, args.high_frac, args.high_window,
+                                                 args.high_merge_gap, args.high_min_len):
+                out.write(f"{contig}\t{start}\t{end}\t{end-start}\t{mean:.1f}\t{med}\t{mean/med:.2f}\n")
+    print(f"-> {args.out_high}")
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -127,6 +165,7 @@ def main():
     ap.add_argument("--fai", required=True, help="reference .fai (genome length)")
     ap.add_argument("--out-summary", required=True, help="coverage summary TSV")
     ap.add_argument("--out-low", required=True, help="low-coverage regions TSV")
+    ap.add_argument("--out-high", required=True, help="high-coverage regions TSV")
     ap.add_argument("--min-mapq", type=int, default=20, help="minimum mapping quality [20]")
     ap.add_argument("--low-depth", type=int, default=10, help="absolute depth floor for 'low' [10]")
     ap.add_argument("--low-frac", type=float, default=0.25,
@@ -135,6 +174,14 @@ def main():
                     help="minimum low-coverage region length (bp) [20]")
     ap.add_argument("--low-merge-gap", type=int, default=10,
                     help="merge low regions closer than this (bp) [10]")
+    ap.add_argument("--high-frac", type=float, default=1.7,
+                    help="window is 'high' above this x the replicon median depth [1.7]")
+    ap.add_argument("--high-window", type=int, default=100,
+                    help="window size (bp) for the high-coverage scan [100]")
+    ap.add_argument("--high-min-len", type=int, default=1000,
+                    help="minimum high-coverage region length (bp) [1000]")
+    ap.add_argument("--high-merge-gap", type=int, default=300,
+                    help="merge high regions closer than this (bp) [300]")
     args = ap.parse_args()
     try:
         run(args)
