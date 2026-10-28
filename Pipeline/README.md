@@ -156,8 +156,10 @@ This builds every per-step environment into `~/Pipeline/.conda_envs/`, and all y
 them. It takes 15–40 min, and medaka is the largest. When it finishes it prints
 `All conda environments are built in …`.
 
-> Re-run `~/Pipeline/run.sh setup` whenever a file in `envs/` changes. A run that needs a
-> missing environment would otherwise try to download it from a compute node.
+> Re-run `~/Pipeline/run.sh setup` after every `git pull` that adds or changes a file in
+> `envs/`. Compute nodes have no internet: a run that reached a step whose environment is
+> missing would wait forever. `run.sh` now checks this before starting and stops with the list
+> of missing environments.
 
 ### 2.5 Test the installation on the bundled data (≈ 5 min)
 
@@ -621,7 +623,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 |---|---|
 | `conda: command not found` | load / initialise conda on that cluster (as when you installed) |
 | `conda environment 'seqpipe' not found` | do [2.3](#23-create-the-driver-environment-snakemake) |
-| run stuck or failing on "Creating conda environment" on a compute node | the environments were not built: run `~/Pipeline/run.sh setup` on a login node ([2.4](#24-build-the-tool-environments-login-node-needs-internet)) |
+| `ERROR: these conda environments are not built yet`, or a run stuck with nothing happening / on "Creating conda environment" | the environments were not built: run `~/Pipeline/run.sh setup` on a login node ([2.4](#24-build-the-tool-environments-login-node-needs-internet)). (Before this fix, `setup` built only the environments of the first steps, those before the depth check) |
 | `ERROR: not inside a SLURM allocation` | start `salloc` first (inside tmux), or add `-n` for a dry run |
 | `sample_sheet is missing required column(s)` | the sheet is not tab-separated, or the header is misspelled |
 | `N problem(s) in sample_sheet …` | the list below it says which sample and column. Fix them all, then re-run |

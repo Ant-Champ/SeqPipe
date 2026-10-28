@@ -37,7 +37,10 @@ mode="$1"; shift
 extra=()
 case "$mode" in
     -h|--help) usage ;;
-    setup) config="$PIPELINE_DIR/test/config.yaml"; extra=(--conda-create-envs-only) ;;
+    # setup: the depth check (a checkpoint) is switched off so that snakemake sees
+    # every step of the test config -- otherwise only the steps before it are
+    # known and their conda environments alone would be built
+    setup) config="$PIPELINE_DIR/test/config.yaml"; extra=(--conda-create-envs-only --config min_theoretical_depth=0) ;;
     test)  config="$PIPELINE_DIR/test/config.yaml" ;;
     *)     config="$(readlink -f "$mode")" ;;
 esac
@@ -84,6 +87,27 @@ cmd=(snakemake
      --cores "$cores" --resources mem_mb="$mem_mb"
      --rerun-incomplete --keep-going --printshellcmds
      ${extra[@]+"${extra[@]}"} "$@")
+
+# --- every conda environment this run needs must already be built ------------
+# Compute nodes have no internet: an environment missing there makes conda wait
+# forever (the run "stalls" when it reaches that step). Check before starting.
+if [ "$mode" != setup ] && [ "$dry" = no ]; then
+    missing=$(snakemake --snakefile "$PIPELINE_DIR/Snakefile" --configfile "$config" --directory "$run_dir" \
+                  --use-conda --conda-prefix "$CONDA_ENVS_DIR" --cores 1 --list-conda-envs \
+                  --config min_theoretical_depth=0 2>/dev/null \
+              | awk -F'\t' 'NR > 1 && NF >= 3 && $3 != "" { print $1 "\t" $3 }' \
+              | while IFS=$'\t' read -r env loc; do [ -d "$loc" ] || echo "  $(basename "$env")"; done)
+    if [ -n "$missing" ]; then
+        cat >&2 <<EOF
+ERROR: these conda environments are not built yet:
+$missing
+Compute nodes have no internet, so the run would hang when it reaches them.
+Build them once on a login node (after every 'git pull' that changes envs/):
+    $PIPELINE_DIR/run.sh setup
+EOF
+        exit 1
+    fi
+fi
 
 echo "+ ${cmd[*]}"
 "${cmd[@]}"
