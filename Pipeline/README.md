@@ -604,6 +604,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_mapq` | 20 | evidence below this mapping quality cannot name the cassette |
 | `cassette_min_reads` | 2 | minimum reads for a junction |
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
+| `cassette_min_end_trim` | 20 | a cassette end that is genome sequence (homology arms, the start codon and flanks a Keio cassette keeps…) is trimmed off before mapping when at least this long; otherwise reads over the junction map straight into the cassette and the junction is invisible. See `logs/build_cassettes.log` and `cassettes/cassette_trims.tsv` |
 | `cassette_min_clip` | 20 | a soft clip (≥ this) that continues into a cassette, or a cassette read's clip found once in the genome, is a junction read (most junction reads are only clipped, not split). Shorter clips match a bacterial genome by chance |
 | `cassette_hotspot_gap`, `cassette_hotspot_min_reads` | 1000, 3 | hotspots: merge evidence closer than this; minimum reads per hotspot (each gets a picture) |
 | `cassette_hotspot_min_junction_reads` | 2 | minimum reads crossing a junction (clip / split) in a hotspot: mates alone (chimeric pairs) are not a hotspot |

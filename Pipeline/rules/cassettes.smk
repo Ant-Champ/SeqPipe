@@ -32,20 +32,54 @@ def _cassette_param(key):
 
 
 rule build_cassettes:
-    """All cassettes of cassette_dir -> one FASTA (record names = cassette names)."""
+    """All cassettes of cassette_dir -> one FASTA (record names = cassette names).
+    Ends of a cassette that are genome sequence (homology arms, the start codon
+    and flanks a Keio cassette keeps...) are trimmed off: otherwise a read over
+    the insertion junction maps straight through them into the cassette and the
+    junction is invisible. Trims -> cassettes/cassette_trims.tsv (the report
+    shifts the cassette features by them)."""
     input:
-        [c["path"] for c in CASSETTES],
+        cassettes = [c["path"] for c in CASSETTES],
+        genomes   = lambda wc: sorted({ref_gb_path(s) for s in SAMPLE_NAMES}),
     output:
         fasta = OUT_DIR + "cassettes/cassettes.fasta",
+        trims = OUT_DIR + "cassettes/cassette_trims.tsv",
     log:
         OUT_DIR + "logs/build_cassettes.log",
+    params:
+        min_trim = config.get("cassette_min_end_trim", 20),
     run:
         from Bio import SeqIO
-        with open(output.fasta, "w") as out_fh, open(log[0], "w") as log_fh:
+        comp = str.maketrans("ACGTN", "TGCAN")
+        genome = "|".join(str(r.seq).upper() for p in input.genomes for r in SeqIO.parse(p, "genbank"))
+        genome += "|" + genome.translate(comp)[::-1]
+
+        def end_in_genome(seq, prefix):
+            """Longest prefix (or suffix) of seq found in the genome, if >= min_trim bp."""
+            part = (lambda k: seq[:k]) if prefix else (lambda k: seq[len(seq) - k:])
+            lo, hi = 0, len(seq) // 2                     # keep at least half of the cassette
+            if part(params.min_trim) not in genome:
+                return 0
+            lo = params.min_trim
+            while lo < hi:                                # binary search on the length
+                mid = (lo + hi + 1) // 2
+                if part(mid) in genome:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            return lo
+
+        with open(output.fasta, "w") as out_fh, open(output.trims, "w") as tr_fh, open(log[0], "w") as log_fh:
+            tr_fh.write("cassette\tlength\ttrim_5\ttrim_3\n")
             for c in CASSETTES:
                 rec = list(SeqIO.parse(c["path"], c["format"]))[c["index"]]
-                out_fh.write(f">{c['name']}\n{str(rec.seq).upper()}\n")
-                log_fh.write(f"{c['name']}\t{len(rec.seq)} bp\t{c['path']}\n")
+                seq = str(rec.seq).upper()
+                t5, t3 = end_in_genome(seq, True), end_in_genome(seq, False)
+                out_fh.write(f">{c['name']}\n{seq[t5:len(seq) - t3]}\n")
+                tr_fh.write(f"{c['name']}\t{len(seq)}\t{t5}\t{t3}\n")
+                log_fh.write(f"{c['name']}\t{len(seq)} bp\t{c['path']}\n")
+                if t5 or t3:
+                    log_fh.write(f"  trimmed {t5} bp (5') and {t3} bp (3'): genome sequence at the cassette ends\n")
 
 
 rule cassette_reference:

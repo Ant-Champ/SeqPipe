@@ -406,7 +406,7 @@ def run(args):
     homology = _homology(cass_seqs, genome_seqs) if genome_seqs else []
     for c, cs, ce, g, gs, ge in homology:
         print(f"WARNING: {c}:{cs}-{ce} ({ce - cs} bp) is identical to the genome at {g}:{gs}-{ge}: "
-              f"evidence there needs reads that map uniquely on the cassette")
+              f"mates there count only if they map uniquely on the cassette")
     # genome windows where the cassette copy can attract reads of the genome copy
     homol_win = defaultdict(list)
     for c, cs, ce, g, gs, ge in homology:
@@ -502,9 +502,6 @@ def run(args):
             continue
         segs.sort(key=lambda s: (s[5], s[6]))
         events.extend(_junctions_of(segs, key, args, cass_set, secs, read_segs))
-    # near a genome region identical to a cassette, only reads naming a cassette count
-    events = [e for e in events if e["name"]
-              or not any(a <= e["pos"] < b for a, b in homol_win.get(e["contig"], ()))]
 
     by_site = defaultdict(list)
     for e in events:
@@ -601,11 +598,15 @@ def run(args):
             out.write("\t".join(str(x) for x in s) + "\n")
     evidence = [[e["contig"], e["pos"], e["pos"] + 1, e["kind"], e["key"][0], e["name"]] for e in events]
     evidence += [[g, a, b, "mate", qn, nm] for g, a, b, qn, nm in mate_reads]
+    # mates near a genome region identical to part of a cassette can belong to the
+    # genome copy: only those whose cassette mate is unique count there (junction
+    # reads are already protected by the clip checks)
     n_ev = len(evidence)
-    evidence = [e for e in evidence if e[5] or not any(a <= e[1] < b for a, b in homol_win.get(e[0], ()))]
+    evidence = [e for e in evidence if e[3] != "mate" or e[5]
+                or not any(a <= e[1] < b for a, b in homol_win.get(e[0], ()))]
     if n_ev - len(evidence):
-        print(f"{n_ev - len(evidence)} evidence read(s) dropped: near a genome region identical to a "
-              f"cassette, without a read mapping uniquely on the cassette")
+        print(f"{n_ev - len(evidence)} mate(s) dropped: near a genome region identical to part of a "
+              f"cassette, cassette mate not unique")
     spots = sorted(_hotspots(evidence, args, cass_list), key=lambda x: (order[x[0]], x[1]))
     if args.out_hotspots:
         with open(args.out_hotspots, "w") as out:
