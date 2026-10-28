@@ -616,7 +616,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `features` all `.` in annotated tables | the GenBank file has no features, or they are only of a skipped type (`annotate_skip_types`) |
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |
-| IGV snapshots fail | check `igv_exe` and that `xvfb-run` exists on the node (`which xvfb-run`) |
+| IGV snapshots fail | check `igv_exe` and that `xvfb-run` exists on the node (`which xvfb-run`). IGV is tried 3 times per sample, at most 4 IGVs run at once (`IGV_JOBS=2 ./run.sh ...` for fewer); if it still fails, the sample gets `igv_snapshots/IGV_FAILED.txt` with IGV's last output and the run goes on |
 | no IGV pictures, no error | `run_igv_snapshots` is `false` (the report says "IGV snapshots are off"). Set it to `true` (and `run_cassette_search: true`) |
 | a sample has a red "Low diversity" banner | too few bases for `min_theoretical_depth`: re-sequence, or lower `min_theoretical_depth` to force the analysis |
 | low-coverage regions all over a low-depth sample | check `<sample>/logs/lowcov.log` (threshold, median). Lower `lowcov_min_depth`, raise `lowcov_min_len` (e.g. 500), or lower `lowcov_region_max_frac` |

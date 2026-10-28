@@ -210,7 +210,8 @@ if RUN_IGV:
             flank   = config.get("igv_flank", 1000),
             heap_mb = config.get("igv_heap_mb", 4000),
         resources:
-            mem_mb = config.get("igv_mem_mb", 6000),
+            mem_mb   = config.get("igv_mem_mb", 6000),
+            igv_jobs = 1,          # run.sh allows 4 IGVs at once (IGV_JOBS=n to change)
         conda:
             "../envs/plasmid_screen.yaml"
         shell:

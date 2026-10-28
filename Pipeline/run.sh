@@ -81,7 +81,7 @@ cmd=(snakemake
      --configfile "$config"
      --directory "$run_dir"
      --use-conda --conda-prefix "$CONDA_ENVS_DIR"
-     --cores "$cores" --resources mem_mb="$mem_mb"
+     --cores "$cores" --resources mem_mb="$mem_mb" igv_jobs="${IGV_JOBS:-4}"
      --rerun-incomplete --keep-going --printshellcmds
      ${extra[@]+"${extra[@]}"} "$@")
 

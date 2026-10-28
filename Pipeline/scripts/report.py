@@ -237,6 +237,9 @@ def gather_sample(s, out_dir, tg, embed_igv):
         if pngs:
             imgs = [[png_data_uri(p) if embed_igv else rel(p), os.path.basename(p)[:-4]] for p in pngs]
             add("cassettes", "IGV snapshots", images=imgs)
+        elif os.path.isfile(os.path.join(igv_dir, "IGV_FAILED.txt")):
+            add("cassettes", "IGV snapshots", note="IGV failed for this sample (see "
+                + rel(os.path.join(igv_dir, "IGV_FAILED.txt")) + ").")
         elif os.path.isfile(os.path.join(igv_dir, "NO_CASSETTE_INSERTIONS.txt")):
             add("cassettes", "IGV snapshots", note="No insertion site, so no snapshot.")
         elif tg.get("igv"):

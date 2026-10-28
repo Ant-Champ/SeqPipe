@@ -21,9 +21,11 @@ instead and IGV is not run.
 import argparse
 import json
 import os
+import random
 import re
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 from Bio import SeqIO
@@ -50,6 +52,8 @@ def main():
     p.add_argument("--memory", type=int, default=4000,
                    help="IGV Java heap in MB, applied via _JAVA_OPTIONS=-Xmx<memory>m "
                         "(default: 4000)")
+    p.add_argument("--attempts", type=int, default=3,
+                   help="tries before giving up (IGV_FAILED.txt, exit 0) (default: 3)")
     args = p.parse_args()
 
     outdir = Path(args.outdir).resolve()
@@ -227,24 +231,41 @@ def main():
         check=False,
     ).returncode == 0
 
-    if xvfb:
-        command = [
-            "xvfb-run", "-a",
-            *igv_cmd,
-            "-b", str(batch),
-        ]
-    else:
-        command = [
-            *igv_cmd,
-            "-b", str(batch),
-        ]
-
-    print("Running IGV:")
-    print(" ".join(shlex.quote(x) for x in command))
     # Cap the IGV JVM heap (the igv.sh launcher honours _JAVA_OPTIONS).
     env = dict(os.environ)
     env["_JAVA_OPTIONS"] = f"-Xmx{args.memory}m"
-    subprocess.run(command, check=True, env=env)
+
+    # Many IGV jobs run at once: `xvfb-run -a` alone lets two of them pick the
+    # same free display and one dies. Start each attempt at a random display
+    # number, and retry a few times before giving up.
+    log_tail = ""
+    for attempt in range(1, args.attempts + 1):
+        for png in outdir.glob("*.png"):
+            png.unlink()
+        if xvfb:
+            command = ["xvfb-run", "-a", "-n", str(random.randint(100, 30000)),
+                       "-s", "-screen 0 1600x1200x24", *igv_cmd, "-b", str(batch)]
+        else:
+            command = [*igv_cmd, "-b", str(batch)]
+        print(f"Running IGV (attempt {attempt}/{args.attempts}):", flush=True)
+        print(" ".join(shlex.quote(x) for x in command), flush=True)
+        res = subprocess.run(command, env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True)
+        print(res.stdout, flush=True)
+        n_png = len(list(outdir.glob("*.png")))
+        if res.returncode == 0 and n_png >= len(regions):
+            print(f"{n_png} snapshot(s) written")
+            (outdir / "IGV_FAILED.txt").unlink(missing_ok=True)
+            return
+        log_tail = "\n".join(res.stdout.splitlines()[-30:])
+        print(f"IGV exit status {res.returncode}, {n_png}/{len(regions)} snapshot(s)", flush=True)
+        time.sleep(random.uniform(5, 20))
+
+    # Pictures are a nice-to-have: do not fail the whole run for them.
+    (outdir / "IGV_FAILED.txt").write_text(
+        f"IGV failed {args.attempts} times; the insertion tables are still valid. "
+        f"See logs/cassette_igv_snapshots.log. Last output:\n{log_tail}\n")
+    print("WARNING: IGV failed, IGV_FAILED.txt written")
 
 
 if __name__ == "__main__":
