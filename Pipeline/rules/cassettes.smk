@@ -10,6 +10,9 @@
 # one insertion site (for a Keio replacement, the span is the deleted gene).
 # Short reads: soft-clipped genome reads whose clip continues into a cassette
 # are junction evidence too (most junction reads have no split alignment).
+# Hotspots: every read on a cassette is followed back to the genome (its mate,
+# its soft clip located in the genome, junction reads); nearby evidence is
+# merged into hotspots, and IGV takes a picture of each one.
 # The cassette IDENTITY of a site is only called from uniquely mapped
 # evidence (the read itself, or its mate); otherwise it is reported as
 # ambiguous(A|B) -- the position is still valid.
@@ -143,6 +146,7 @@ rule find_cassette_insertions:
         insertions = OUT_DIR + "{sample}/cassettes/{sample}.cassette_insertions.tsv",
         counts     = OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv",
         depth      = OUT_DIR + "{sample}/cassettes/{sample}.cassette_depth.tsv",
+        hotspots   = OUT_DIR + "{sample}/cassettes/{sample}.cassette_hotspots.tsv",
     log:
         OUT_DIR + "{sample}/logs/find_cassette_insertions.log",
     params:
@@ -156,6 +160,8 @@ rule find_cassette_insertions:
         cluster_tol = _cassette_param("cluster_tol"),
         min_clip    = config.get("cassette_min_clip", 12),
         mate_window = config.get("cassette_mate_window", 1000),
+        hot_gap     = config.get("cassette_hotspot_gap", 1000),
+        hot_min     = config.get("cassette_hotspot_min_reads", 3),
     conda:
         "../envs/regions.yaml"
     shell:
@@ -165,7 +171,9 @@ rule find_cassette_insertions:
         "--min-reads {params.min_reads} --max-span {params.max_span} "
         "--out-junctions {output.junctions} --out-insertions {output.insertions} "
         "--out-counts {output.counts} --out-depth {output.depth} --fasta {input.ref} "
-        "--min-clip {params.min_clip} --mate-window {params.mate_window} > {log} 2>&1"
+        "--min-clip {params.min_clip} --mate-window {params.mate_window} "
+        "--out-hotspots {output.hotspots} --hotspot-gap {params.hot_gap} "
+        "--hotspot-min-reads {params.hot_min} > {log} 2>&1"
 
 
 rule annotate_cassette_tables:
@@ -176,7 +184,7 @@ rule annotate_cassette_tables:
     output:
         OUT_DIR + "{sample}/annotated/{sample}.cassette_{table}.annotated.tsv",
     wildcard_constraints:
-        table = "insertions|junctions",
+        table = "insertions|junctions|hotspots",
     log:
         OUT_DIR + "{sample}/logs/annotate_cassette_{table}.log",
     params:
@@ -196,10 +204,11 @@ rule annotate_cassette_tables:
 if RUN_IGV:
 
     rule cassette_igv_snapshots:
-        """One IGV PNG per insertion site: reference + annotation, all reads
-        vs genome, and the genome+cassettes alignment (junction reads)."""
+        """One IGV PNG per cassette hotspot (every place where reads on a
+        cassette lead back to the genome): reference + annotation, all reads vs
+        genome, and the genome+cassettes alignment (junction reads, mates)."""
         input:
-            regions      = OUT_DIR + "{sample}/annotated/{sample}.cassette_insertions.annotated.tsv",
+            regions      = OUT_DIR + "{sample}/annotated/{sample}.cassette_hotspots.annotated.tsv",
             all_bam      = OUT_DIR + "{sample}/{sample}.sorted.bam",
             all_bai      = OUT_DIR + "{sample}/{sample}.sorted.bam.bai",
             cassette_bam = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam",

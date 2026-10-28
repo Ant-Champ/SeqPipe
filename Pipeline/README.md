@@ -411,6 +411,7 @@ Rule (step) names for `--forcerun` / `--until`:
     <sample>.assembly.fasta / .assembly_info.txt / .assembly_graph.gfa
     <sample>.plasmid_panel.sorted.bam, <sample>.plasmid_coverage.tsv
     annotated/<sample>.cassette_insertions.annotated.tsv   insertion sites (+ replaced genes)
+    annotated/<sample>.cassette_hotspots.annotated.tsv     every place reads on a cassette lead back to (IGV pictures)
     annotated/<sample>.cassette_junctions.annotated.tsv    every genome/cassette junction
     cassettes/<sample>.cassette_counts.tsv                 uniquely mapped reads per cassette
     cassettes/<sample>.genome_cassettes.sorted.bam         reads vs genome + cassettes (IGV), igv_snapshots/*.png
@@ -481,6 +482,7 @@ there but could not be read, and the reason is in `logs/run_summary.log`.
 | `multimer`, `multimer_copies`, `multimer_pct` | ONT multimer call |
 | `assembly_contigs`, `assembly_circular` | number of contigs / circular contigs (`skipped` if too little data) |
 | `cassette_insertions` | `cassette@contig:start-end[replaced genes]` per site, `;`-separated, `none` if no site. One-sided sites read `cassette@contig:pos(left_only)` |
+| `cassette_hotspots` | same format, one entry per hotspot (see the cassette tables) |
 
 ### The region tables (low coverage, indels, breakpoints)
 
@@ -535,6 +537,14 @@ Coordinates are on the genome, 0-based like the other region tables. Each table 
 | table | columns |
 |---|---|
 | `cassette_insertions` | contig, start, end, length, status, cassette, orientation, n_reads_left, n_reads_right, left_junction, right_junction |
+| `cassette_hotspots` | contig, start, end, length, status (`hotspot`), cassette, n_reads, n_mates, n_genome_clip, n_cassette_clip, n_split, junctions (`pos:reads`, top 3) |
+
+**Hotspots** follow every read on a cassette back to the genome: its mate (mapped uniquely on
+the genome), its soft-clipped bases (found exactly once in the genome), and the genome reads
+clipped into a cassette. Evidence closer than `cassette_hotspot_gap` bp is one hotspot; a hotspot
+needs `cassette_hotspot_min_reads` reads. A Keio replacement gives one hotspot per side when the
+replaced gene is longer than the gap. Hotspots are reported even when no precise left/right junction pair
+is found, and IGV takes a picture of each one. `junctions` gives the most supported junction bases.
 | `cassette_junctions` | contig, start, end, genome_side, cassette, cassette_end, orientation, n_reads, n_unique, n_ambiguous, support, junction_id |
 | `cassette_counts` | cassette, length, reads_unique, reads_ambiguous, breadth_unique_pct, mean_depth_unique |
 
@@ -590,6 +600,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_reads` | 2 | minimum reads for a junction |
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
 | `cassette_min_clip` | 12 | short reads: a uniquely mapped genome read whose soft clip (≥ this) continues into a cassette is a junction read (most junction reads are only clipped, not split) |
+| `cassette_hotspot_gap`, `cassette_hotspot_min_reads` | 1000, 3 | hotspots: merge evidence closer than this; minimum reads per hotspot (each gets an IGV picture) |
 | `cassette_mate_window` | 1000 | short reads: when the junction reads only hit the ends cassettes share, the read pairs within this distance (genome mate) whose other mate is unique on a cassette name it |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `igv_exe`, `igv_heap_mb`, `igv_flank` | —, 4000, 1000 | IGV launcher, Java heap, bp shown around a site. Snapshots also need `xvfb-run` on the node |
@@ -676,7 +687,8 @@ Changes from those pipelines:
   plasmid panel, re-map them, cluster them into "hotspots") is replaced by `run_cassette_search`.
   The new search uses junction reads against genome + all cassettes, and handles homology
   between cassettes. The keys `run_cassette_hotspots`, `cassette_reference`,
-  `cassette_hotspot_*` and `chlor_*` are no longer used.
+  `chlor_*` and the old `cassette_hotspot_*` keys of that step are no longer used (the new
+  `cassette_hotspot_gap` / `cassette_hotspot_min_reads` belong to `run_cassette_search`).
 - **Assembly bug fixed:** a hard-coded 4.6 Mb minimum that skipped every plasmid assembly.
 - **Execution:** no SLURM job submission any more (`salloc` + `run.sh`). Environments are
   shared by all runs.

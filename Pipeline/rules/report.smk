@@ -58,6 +58,8 @@ def _report_inputs(wildcards=None):
     if RUN_CASSETTES:
         d["cassette_more"] = expand(OUT_DIR + "{sample}/annotated/{sample}.cassette_junctions.annotated.tsv",
                                     sample=OK) \
+                           + expand(OUT_DIR + "{sample}/annotated/{sample}.cassette_hotspots.annotated.tsv",
+                                    sample=OK) \
                            + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK) \
                            + expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_depth.tsv", sample=OK)
     if RUN_IGV:
@@ -88,6 +90,7 @@ rule html_report:
             "igv":           bool(RUN_IGV),
         },
         embed_igv = config.get("report_embed_igv", True),
+        cassettes = CASSETTES if RUN_CASSETTES else [],      # their features under the cassette plots
     conda:
         "../envs/python.yaml"
     script:

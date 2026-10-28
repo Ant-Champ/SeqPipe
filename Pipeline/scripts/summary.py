@@ -28,7 +28,7 @@ COLUMNS = [
     "pct_mapped", "mean_depth", "min_replicon_breadth",
     "detected_mutations", "low_cov_regions", "high_cov_regions", "large_indels", "breakpoints",
     "multimer", "multimer_copies", "multimer_pct",
-    "assembly_contigs", "assembly_circular", "cassette_insertions",
+    "assembly_contigs", "assembly_circular", "cassette_insertions", "cassette_hotspots",
 ]
 
 
@@ -262,6 +262,8 @@ def summarize_sample(s, out_dir, tg):
     if tg.get("cassettes"):
         rec["cassette_insertions"] = try_(name, "cassette_insertions", lambda: cassette_sites(
             os.path.join(d, "annotated", name + ".cassette_insertions.annotated.tsv")))
+        rec["cassette_hotspots"] = try_(name, "cassette_hotspots", lambda: cassette_sites(
+            os.path.join(d, "annotated", name + ".cassette_hotspots.annotated.tsv")))
     return rec
 
 
@@ -275,7 +277,7 @@ def cassette_sites(path):
                 continue
             c = line.rstrip("\n").split("\t")
             genes = sorted({f.split(":", 1)[1].split("(")[0] for f in c[-1].split(";") if ":" in f})
-            where = f"{c[0]}:{c[1]}-{c[2]}" if c[4] == "paired" else f"{c[0]}:{c[1]}({c[4]})"
+            where = f"{c[0]}:{c[1]}-{c[2]}" if c[4] in ("paired", "hotspot") else f"{c[0]}:{c[1]}({c[4]})"
             sites.append(f"{c[5]}@{where}" + (f"[{','.join(genes)}]" if genes else ""))
     return ";".join(sites) if sites else "none"
 

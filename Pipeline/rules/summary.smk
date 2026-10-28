@@ -34,8 +34,8 @@ def _run_summary_inputs(wildcards=None):
         d["assembly_infos"] = expand(OUT_DIR + "{sample}/{sample}.assembly_info.txt", sample=OK)
     if RUN_CASSETTES:
         d["cassette_insertions"] = expand(
-            OUT_DIR + "{sample}/annotated/{sample}.cassette_insertions.annotated.tsv", sample=OK
-        )
+            OUT_DIR + "{sample}/annotated/{sample}.cassette_{table}.annotated.tsv", sample=OK,
+            table=["insertions", "hotspots"])
     return d
 
 

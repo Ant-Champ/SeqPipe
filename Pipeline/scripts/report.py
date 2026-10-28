@@ -35,7 +35,7 @@ SECTIONS = [
      "seqkit stats of the raw and filtered reads; fastp report for short reads."),
     ("coverage",  "Alignment & coverage", None,
      "Depth along every replicon (drag on a plot to zoom, double-click to reset; "
-     "red = low-coverage region, teal = high-coverage region, green = cassette, orange = breakpoint, purple = indel, "
+     "red = low-coverage region, teal = high-coverage region, green = cassette insertion site, light green = cassette hotspot, orange = breakpoint, purple = indel, "
      "black ticks = variants). samtools coverage per replicon and flagstat."),
     ("variants",  "Variants",  "variants",
      "Small variants against the reference (medaka for ONT, bcftools for short reads). "
@@ -111,14 +111,15 @@ def read_depth(path):
     return out
 
 
-def read_genes(gb_path):
-    """GenBank -> {contig id: [[start, end, strand, name, product], ...]} (CDS/rRNA/tRNA/ncRNA)."""
+def read_genes(gb_path, types=("CDS", "rRNA", "tRNA", "ncRNA")):
+    """GenBank -> {contig id: [[start, end, strand, name, product], ...]} (features of
+    these types; types=None: every feature but 'source')."""
     from Bio import SeqIO
     genes = {}
     for rec in SeqIO.parse(gb_path, "genbank"):
         feats = []
         for f in rec.features:
-            if f.type not in ("CDS", "rRNA", "tRNA", "ncRNA"):
+            if (f.type not in types) if types else f.type == "source":
                 continue
             q = f.qualifiers
             name = (q.get("gene") or q.get("locus_tag") or q.get("label") or [f.type])[0]
@@ -230,6 +231,9 @@ def gather_sample(s, out_dir, tg, embed_igv):
         t = read_table(ann + ".cassette_insertions.annotated.tsv")
         add("cassettes", "Insertion sites", table=t)
         events += events_from(t, "cassette", ["cassette", "orientation"])
+        t = read_table(ann + ".cassette_hotspots.annotated.tsv")
+        add("cassettes", "Hotspots (everywhere reads on a cassette lead back to the genome)", table=t)
+        events += events_from(t, "hotspot", ["cassette", "n_reads"])
         add("cassettes", "Junctions", table=read_table(ann + ".cassette_junctions.annotated.tsv"))
         add("cassettes", "Reads per cassette", table=read_table(
             os.path.join(d, "cassettes", name + ".cassette_counts.tsv")))
@@ -276,7 +280,33 @@ def gather_sample(s, out_dir, tg, embed_igv):
     }
 
 
-def main(samples, out_dir, toggles, embed_igv, config, out_html):
+def cassette_features(cassettes):
+    """{cassette name: [[start, end, strand, name, note], ...]} from the cassette
+    GenBank files (FASTA cassettes have none)."""
+    from Bio import SeqIO
+    out = {}
+    for c in cassettes:
+        if c.get("format") != "genbank":
+            continue
+        try:
+            rec = list(SeqIO.parse(c["path"], "genbank"))[c["index"]]
+            feats = []
+            for f in rec.features:
+                if f.type == "source":
+                    continue
+                q = f.qualifiers
+                name = (q.get("gene") or q.get("label") or q.get("locus_tag") or q.get("name")
+                        or q.get("product") or [f.type])[0]
+                note = (q.get("product") or q.get("note") or [f.type])[0]
+                feats.append([int(f.location.start) + 1, int(f.location.end),
+                              1 if (f.location.strand or 1) > 0 else -1, name, str(note)[:80]])
+            out[c["name"]] = feats
+        except Exception as err:           # annotations are a nice-to-have
+            log("WARNING: features of cassette %s: %s" % (c["name"], err))
+    return out
+
+
+def main(samples, out_dir, toggles, embed_igv, config, out_html, cassettes=()):
     data = {
         "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "out_dir": os.path.abspath(out_dir),
@@ -288,6 +318,7 @@ def main(samples, out_dir, toggles, embed_igv, config, out_html):
         "config": {k: v for k, v in sorted(config.items()) if isinstance(v, (str, int, float, bool))},
         "order": [s["sample_name"] for s in samples],
         "samples": {}, "genes": {}, "ref_of": {},
+        "cassette_genes": cassette_features(cassettes),
     }
     for s in samples:
         name = s["sample_name"]
@@ -321,7 +352,7 @@ PAGE = r"""<!doctype html>
 <style>
 :root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5d8a;
  --depth:#4a7fb5;--low:rgba(214,64,52,.18);--lowedge:#d64034;--high:rgba(23,150,150,.2);--highedge:#179696;--cas:#2e9e5b;--bp:#e08a1e;--indel:#8a4fc2;--var:#1d1d1b;
- --gene:#9aa4ae;--good:#2e9e5b;--warn:#d9a21b;--bad:#d64034;--chip:#eef2f6}
+ --hot:#8fcf9f;--gene:#9aa4ae;--good:#2e9e5b;--warn:#d9a21b;--bad:#d64034;--chip:#eef2f6}
 @media (prefers-color-scheme: dark){:root{--bg:#161615;--panel:#1f1f1e;--ink:#ecebe6;--muted:#9c9b95;--line:#33332f;
  --accent:#8db6e0;--depth:#6f9fd1;--low:rgba(240,100,90,.22);--var:#ecebe6;--gene:#6c7680;--chip:#26303a}}
 *{box-sizing:border-box}
@@ -502,11 +533,11 @@ function combined(secKey, title) {
 // ---------------------------------------------------------------- coverage plot
 const PLOTS = {};
 const TRACK = { depth: 120, ev: 18, gene: 30, axis: 18 };
-const EVCOL = { lowcov: "--lowedge", highcov: "--highedge", cassette: "--cas", breakpoint: "--bp", indel: "--indel", variant: "--var" };
+const EVCOL = { lowcov: "--lowedge", highcov: "--highedge", cassette: "--cas", hotspot: "--hot", breakpoint: "--bp", indel: "--indel", variant: "--var" };
 
 function plot(sample, contig, cassette = false) {
   const smp = D.samples[sample], dp = (cassette ? smp.cdepth : smp.depth)[contig];
-  const genes = cassette ? [] : (D.genes[D.ref_of[sample]] || {})[contig] || [];
+  const genes = (cassette ? D.cassette_genes || {} : D.genes[D.ref_of[sample]] || {})[contig] || [];
   const ev = cassette ? [] : smp.events.filter(e => e[1] === contig);
   const sorted = dp.v.slice().sort((a, b) => a - b);
   const yMax = Math.max(1, sorted[Math.floor(sorted.length * 0.99)] * 1.15 || 1);
@@ -753,4 +784,5 @@ if "snakemake" in globals():
     with open(str(_sm.log[0]), "w") as _log:
         sys.stderr = _log
         main(list(_sm.params.samples), str(_sm.params.out_dir), dict(_sm.params.toggles),
-             bool(_sm.params.embed_igv), dict(_sm.config), str(_sm.output.html))
+             bool(_sm.params.embed_igv), dict(_sm.config), str(_sm.output.html),
+             list(_sm.params.get("cassettes", [])))

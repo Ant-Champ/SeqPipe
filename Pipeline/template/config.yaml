@@ -160,6 +160,8 @@ cassette_min_mapq  : 20      # read evidence below this mapping quality cannot n
 cassette_min_reads : 2       # minimum junction reads for a junction
 cassette_max_span  : 20000   # max distance between the two junctions of one insertion site (bp)
 cassette_min_clip  : 12      # short reads: soft clips at least this long that continue into a cassette are junction reads
+cassette_hotspot_gap : 1000       # hotspots: evidence (mates, clips, junction reads) closer than this is one hotspot (bp)
+cassette_hotspot_min_reads : 3    # hotspots: minimum reads; IGV takes a picture of every hotspot
 cassette_mate_window : 1000  # short reads: read pairs this close to a junction (genome mate) name its cassette when the junction reads cannot (shared ends)
 # per read type: minimum aligned length on each side of a junction, junction clustering tolerance
 cassette_min_segment_ont   : 100

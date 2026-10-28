@@ -287,7 +287,7 @@ def _rule_all_inputs(wildcards=None):
     if RUN_CASSETTES:
         d["cassette_tables"] = expand(
             OUT_DIR + "{sample}/annotated/{sample}.cassette_{table}.annotated.tsv",
-            sample=OK, table=["insertions", "junctions"]
+            sample=OK, table=["insertions", "junctions", "hotspots"]
         )
         d["cassette_counts"] = expand(OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv", sample=OK)
     if RUN_IGV:
