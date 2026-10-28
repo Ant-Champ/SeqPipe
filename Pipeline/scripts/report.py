@@ -332,7 +332,10 @@ h4{font-size:13px;margin:14px 0 6px;color:var(--muted);font-weight:600}
 .tbl{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 th,td{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
-td.wrap{white-space:normal;min-width:260px}
+td.longtxt{white-space:normal}
+td.longtxt .clip{width:420px;max-height:2.9em;overflow:hidden;cursor:pointer}
+td.longtxt .clip.open{max-height:none}
+td.longtxt .more{color:var(--accent);font-size:11px;cursor:pointer;white-space:nowrap}
 th{position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none;font-weight:600}
 th:after{content:" \2195";color:var(--muted);font-size:10px}
 tr.go{cursor:pointer} tr.go:hover td{background:var(--chip)}
@@ -403,7 +406,7 @@ function table(t, opts = {}) {
     for (const row of shown) {
       const tr = $("tr", linkable ? { class: "go", title: "show on the coverage plot" } : {});
       row.forEach((v, i) => {
-        let td = $("td", longCols.has(i) ? { class: "wrap" } : {}, v);
+        let td = longCols.has(i) ? longCell(v) : $("td", {}, v);
         if (opts.sampleCol === i && D.samples[v]) td = $("td", {}, $("a", { onclick: ev => { ev.stopPropagation(); go("sample", v); } }, v));
         if (opts.heat && opts.heat(i, v)) td.className = opts.heat(i, v);
         tr.append(td);
@@ -427,6 +430,18 @@ function table(t, opts = {}) {
     draw();
   }
   draw(); return box;
+}
+
+// long text (e.g. every gene a region hits): 2 lines, click to expand / collapse
+function longCell(v) {
+  const items = String(v).split(";").map(x => x.trim()).filter(Boolean);
+  const clip = $("div", { class: "clip", title: "click to show all" }, items.join("; "));
+  const td = $("td", { class: "longtxt" }, clip);
+  if (items.length > 3) td.append($("span", { class: "more" }, ` ${items.length} items`));
+  const toggle = ev => { ev.stopPropagation(); clip.classList.toggle("open"); };
+  clip.addEventListener("click", toggle);
+  td.querySelector(".more")?.addEventListener("click", toggle);
+  return td;
 }
 
 function block(b, sample) {
