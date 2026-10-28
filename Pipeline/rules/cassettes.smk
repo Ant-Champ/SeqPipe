@@ -8,6 +8,8 @@
 # being given to one cassette at random. Reads that are part genome / part
 # cassette give each junction to the base; a left + right junction pair is
 # one insertion site (for a Keio replacement, the span is the deleted gene).
+# Short reads: soft-clipped genome reads whose clip continues into a cassette
+# are junction evidence too (most junction reads have no split alignment).
 # The cassette IDENTITY of a site is only called from uniquely mapped
 # evidence (the read itself, or its mate); otherwise it is reported as
 # ambiguous(A|B) -- the position is still valid.
@@ -135,10 +137,12 @@ rule find_cassette_insertions:
     input:
         bam = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam",
         bai = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.sorted.bam.bai",
+        ref = OUT_DIR + "{sample}/cassettes/{sample}.genome_cassettes.fasta",
     output:
         junctions  = OUT_DIR + "{sample}/cassettes/{sample}.cassette_junctions.tsv",
         insertions = OUT_DIR + "{sample}/cassettes/{sample}.cassette_insertions.tsv",
         counts     = OUT_DIR + "{sample}/cassettes/{sample}.cassette_counts.tsv",
+        depth      = OUT_DIR + "{sample}/cassettes/{sample}.cassette_depth.tsv",
     log:
         OUT_DIR + "{sample}/logs/find_cassette_insertions.log",
     params:
@@ -150,6 +154,8 @@ rule find_cassette_insertions:
         max_span    = config.get("cassette_max_span", 20000),
         min_segment = _cassette_param("min_segment"),
         cluster_tol = _cassette_param("cluster_tol"),
+        min_clip    = config.get("cassette_min_clip", 12),
+        mate_window = config.get("cassette_mate_window", 1000),
     conda:
         "../envs/regions.yaml"
     shell:
@@ -158,7 +164,8 @@ rule find_cassette_insertions:
         "--min-segment {params.min_segment} --cluster-tol {params.cluster_tol} "
         "--min-reads {params.min_reads} --max-span {params.max_span} "
         "--out-junctions {output.junctions} --out-insertions {output.insertions} "
-        "--out-counts {output.counts} > {log} 2>&1"
+        "--out-counts {output.counts} --out-depth {output.depth} --fasta {input.ref} "
+        "--min-clip {params.min_clip} --mate-window {params.mate_window} > {log} 2>&1"
 
 
 rule annotate_cassette_tables:

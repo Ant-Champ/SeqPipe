@@ -11,9 +11,23 @@ cassette evidence on the same read or, for short reads, on its mate. Reads
 without such evidence are 'ambiguous' (candidates = the junction segment's
 contig + its secondary / XA alternatives); they are never assigned silently.
 
-Steps: junctions per read (query-adjacent genome + cassette segments, each
->= min-segment aligned bp) -> clusters by (contig, genome side) -> left/right
+Steps: junctions per read -> clusters by (contig, genome side) -> left/right
 junctions paired into insertion sites (span <= max-span) -> per-cassette counts.
+A read gives a junction when
+  * split read: query-adjacent genome + cassette segments, each >= min-segment
+    aligned bp (supplementary alignments; ONT and short reads), or
+  * soft clip (short reads, needs --fasta): a uniquely mapped genome read whose
+    soft clip (>= --min-clip bp) continues into a cassette sequence. Most short
+    reads over a junction are only clipped (e.g. 48M27S, no supplementary
+    alignment), so this is the main evidence at moderate depth. Identity: the
+    cassettes containing the clipped bases, else the mate if it maps uniquely.
+Read pairs with one mate unique on the genome and the other on a cassette are
+counted per genome kb and printed to the log ("mate links"). When the junction
+reads cannot name the cassette (shared ends), the pairs ending within
+--mate-window bp of the junction (genome side) whose other mate is unique on a
+cassette name it (counted in support, not in n_unique). A cassette with reads but
+no junction and no mate links is not next to the reference genome (e.g. on a
+plasmid, or the wrong reference).
 
 Coordinates are 0-based half-open. A junction 'pos' is the boundary on the
 genome: genome_side 'left' = genome lies at < pos (cassette continues right),
@@ -25,7 +39,7 @@ written (header-only when empty).
   #contig  start  end  genome_side  cassette  cassette_end  orientation  n_reads
   n_unique  n_ambiguous  support  junction_id
   cassette = name | mixed(A:n,B:m) | ambiguous(A|B); support = unique reads per
-  cassette ("A:12,B:0"); orientation '+' = genome and cassette on same strand.
+  cassette ("A:12,B:0"; mates near the junction when the junction reads had none); orientation '+' = genome and cassette on same strand.
 --out-insertions columns:
   #contig  start  end  length  status(paired|left_only|right_only)  cassette
   orientation  n_reads_left  n_reads_right  left_junction  right_junction
@@ -165,6 +179,62 @@ def _junctions_of(segs, key, args, cass_set, secs, read_segs):
     return out
 
 
+_COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+
+
+def _read_fasta(path, names):
+    seqs, cur = {}, None
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                cur = line[1:].split()[0]
+                cur = cur if cur in names else None
+                if cur:
+                    seqs[cur] = []
+            elif cur:
+                seqs[cur].append(line.strip().upper())
+    return {k: "".join(v) for k, v in seqs.items()}
+
+
+def _clip_events(r, args, cass_seqs, cass_unique):
+    """Junction events from the soft clips of one uniquely mapped genome read."""
+    ct, q = r.cigartuples, r.query_sequence
+    if not ct or not q:
+        return []
+    out = []
+    for at_end in (True, False):
+        op, n = ct[-1] if at_end else ct[0]
+        if op != 4 or n < args.min_clip:
+            continue
+        k = min(n, args.clip_kmer)
+        # clipped bases next to the junction, in reference orientation
+        kmer = q[len(q) - n:len(q) - n + k] if at_end else q[n - k:n]
+        hits, orient, cpos = set(), None, None
+        for c, seq in cass_seqs.items():
+            i = seq.find(kmer)
+            if i >= 0:
+                hits.add(c)
+                orient, cpos = "+", i + k / 2
+                continue
+            i = seq.find(kmer.translate(_COMP)[::-1])
+            if i >= 0:
+                hits.add(c)
+                orient, cpos = "-", i + k / 2
+        if not hits:
+            continue
+        clen = len(cass_seqs[next(iter(hits))])
+        name = next(iter(hits)) if len(hits) == 1 else None
+        if name is None and r.is_paired and cass_unique.get(r.query_name) in hits:
+            name = cass_unique[r.query_name]           # identity from the uniquely mapped mate
+            hits = {name}
+        out.append(dict(contig=r.reference_name,
+                        pos=r.reference_end if at_end else r.reference_start,
+                        side="left" if at_end else "right",
+                        cend="5'" if cpos < clen / 2 else "3'", orient=orient,
+                        key=_read_key(r), name=name, cands=hits))
+    return out
+
+
 def run(args):
     import pysam
     for p in (args.out_junctions, args.out_insertions, args.out_counts):
@@ -184,6 +254,7 @@ def run(args):
     read_segs = defaultdict(list)       # (qname, mate) -> segments
     secs = defaultdict(list)            # (qname, mate) -> [(contig, qs, qe)] secondary alns
     interest = set()                    # qnames with any record on a cassette contig
+    cass_unique = {}                    # qname -> cassette of a primary alignment with MAPQ >= min-mapq
 
     def add(r):
         if r.flag & 0x604 or not r.cigartuples:     # unmapped, secondary excluded below
@@ -200,7 +271,7 @@ def run(args):
         secs[_read_key(r)].append((r.reference_name, qs, qe))
 
     # ---- pass 1: cassette contigs (counts + reads of interest)
-    counts = []
+    counts, cass_depth = [], {}
     for c in cass_list:
         if c not in lens:
             counts.append((c, 0, 0, 0, 0.0, 0.0))
@@ -217,6 +288,7 @@ def run(args):
             if not r.flag & 0x800:
                 if r.mapping_quality >= args.min_mapq:
                     n_u += 1
+                    cass_unique[r.query_name] = c
                 else:
                     n_a += 1
         cov = bam.count_coverage(
@@ -224,13 +296,30 @@ def run(args):
             read_callback=lambda r: not (r.flag & 0xF04) and r.mapping_quality >= args.min_mapq)
         depth = [sum(x) for x in zip(*cov)]
         L = lens[c]
+        # depth of all primary reads (any MAPQ: shared cassette ends are MAPQ 0), for the report
+        cov_all = bam.count_coverage(c, quality_threshold=0, read_callback=lambda r: not (r.flag & 0xF04))
+        cass_depth[c] = [sum(x) for x in zip(*cov_all)]
         counts.append((c, L, n_u, n_a, 100.0 * sum(1 for d in depth if d > 0) / max(L, 1),
                        sum(depth) / max(L, 1)))
 
-    # ---- pass 2: genome contigs, only reads with a cassette alignment
+    # ---- pass 2: genome contigs: reads with a cassette alignment, soft-clipped
+    # reads (short reads) and mate links
+    cass_seqs = _read_fasta(args.fasta, cass_set) if args.fasta and args.platform == "short" else {}
+    clip_events, mate_links = [], Counter()
+    unique_mates = defaultdict(list)    # genome contig -> [(start, end, cassette)] mate MAPQ >= min-mapq
     for g in genome:
         for r in bam.fetch(g):
-            if r.is_unmapped or r.flag & 0x200 or r.query_name not in interest:
+            if r.is_unmapped or r.flag & 0x200:
+                continue
+            primary_unique = not r.flag & 0x900 and r.mapping_quality >= args.min_mapq
+            if cass_seqs and primary_unique and "S" in (r.cigarstring or ""):
+                clip_events.extend(_clip_events(r, args, cass_seqs, cass_unique))
+            if primary_unique and r.is_paired and not r.mate_is_unmapped \
+                    and r.next_reference_name in cass_set:
+                mate_links[(g, r.reference_start // 1000, r.next_reference_name)] += 1
+                if cass_unique.get(r.query_name) == r.next_reference_name:
+                    unique_mates[g].append((r.reference_start, r.reference_end, r.next_reference_name))
+            if r.query_name not in interest:
                 continue
             if r.flag & 0x100:
                 add_secondary(r)
@@ -239,7 +328,8 @@ def run(args):
     bam.close()
 
     # ---- junctions per read
-    events = []
+    events = list(clip_events)
+    n_clip = len(events)
     for key, segs in read_segs.items():
         if len(segs) < 2:
             continue
@@ -254,19 +344,30 @@ def run(args):
     junctions = []                      # dicts, sorted later
     for (contig, side), ev in by_site.items():
         for cl in _cluster(ev, args.cluster_tol):
-            # one entry per read
+            # one entry per read (a named call wins: split read + its own clip)
             per_read = {}
             for e in cl:
-                per_read.setdefault(e["key"], e)
+                if e["key"] not in per_read or (e["name"] and not per_read[e["key"]]["name"]):
+                    per_read[e["key"]] = e
             reads = list(per_read.values())
             if len(reads) < args.min_reads:
                 continue
             pos = sorted(Counter(e["pos"] for e in reads).items(), key=lambda x: (-x[1], x[0]))[0][0]
             sup = Counter(e["name"] for e in reads if e["name"])
-            n_u = sum(sup.values())
+            n_u = n_u_reads = sum(sup.values())
             cands = set()
             for e in reads:
                 cands |= e["cands"]
+            if n_u < args.min_reads and len(sup) <= 1:
+                # junction reads cannot tell (shared cassette ends): use the read
+                # pairs on the genome side of the junction whose other mate is
+                # unique on a cassette (within --mate-window bp)
+                for a, b, c in unique_mates.get(contig, []):
+                    near = (pos - args.mate_window <= a and b <= pos + 5) if side == "left" \
+                        else (pos - 5 <= a and b <= pos + args.mate_window)
+                    if near:
+                        sup[c] += 1
+                n_u = sum(sup.values())
             if n_u >= args.min_reads and sup.most_common(1)[0][1] >= 0.8 * n_u:
                 call = sup.most_common(1)[0][0]
             elif len(sup) >= 2:
@@ -275,7 +376,7 @@ def run(args):
                 call = "ambiguous(%s)" % ("|".join(sorted(cands)) or ".")
             junctions.append(dict(
                 contig=contig, pos=pos, side=side, call=call, n_reads=len(reads),
-                n_unique=n_u, n_amb=len(reads) - n_u,
+                n_unique=n_u_reads, n_amb=len(reads) - n_u_reads,
                 cend=Counter(e["cend"] for e in reads).most_common(1)[0][0],
                 orient=Counter(e["orient"] for e in reads).most_common(1)[0][0],
                 support=",".join(f"{c}:{sup.get(c, 0)}" for c in cass_list)))
@@ -328,6 +429,13 @@ def run(args):
                   "n_reads_left\tn_reads_right\tleft_junction\tright_junction\n")
         for s in sites:
             out.write("\t".join(str(x) for x in s) + "\n")
+    if args.out_depth:
+        with open(args.out_depth, "w") as out:
+            out.write("#contig\tstart\tend\tmean_depth\n")
+            for c, d in cass_depth.items():
+                for b in range(0, len(d), args.depth_bin):
+                    w = d[b:b + args.depth_bin]
+                    out.write(f"{c}\t{b + 1}\t{b + len(w)}\t{sum(w) / len(w):.1f}\n")
     with open(args.out_counts, "w") as out:
         out.write("#cassette\tlength\treads_unique\treads_ambiguous\t"
                   "breadth_unique_pct\tmean_depth_unique\n")
@@ -335,6 +443,13 @@ def run(args):
             out.write(f"{c}\t{L}\t{nu}\t{na}\t{br:.1f}\t{md:.2f}\n")
 
     # ---- summary
+    print(f"evidence: {n_clip} soft-clip junction read(s), {len(events) - n_clip} split-read junction(s)")
+    if mate_links:
+        print("mate links (unique genome mate <-> cassette mate), top genome kb:")
+        for (g, kb, c), n in mate_links.most_common(10):
+            print(f"  {g}:{kb * 1000}-{(kb + 1) * 1000}  {c}  {n} pair(s)")
+    elif args.platform == "short":
+        print("mate links: none (no pair with one mate on the genome and one on a cassette)")
     n_pair = sum(1 for s in sites if s[4] == "paired")
     print(f"{len(junctions)} junction(s); {len(sites)} site(s) ({n_pair} paired, "
           f"{len(sites) - n_pair} single-sided)")
@@ -361,9 +476,20 @@ def main():
     ap.add_argument("--min-reads", type=int, default=2, help="minimum reads supporting a junction [2]")
     ap.add_argument("--max-span", type=int, default=20000,
                     help="maximum genome span between paired left/right junctions (bp) [20000]")
+    ap.add_argument("--fasta", default=None,
+                    help="genome + cassettes FASTA: enables soft-clip evidence (short reads)")
+    ap.add_argument("--min-clip", type=int, default=12,
+                    help="minimum soft clip (bp) used as junction evidence [12]")
+    ap.add_argument("--clip-kmer", type=int, default=20,
+                    help="clipped bases (max) matched against the cassettes [20]")
+    ap.add_argument("--mate-window", type=int, default=1000,
+                    help="short reads: mates this close to a junction name its cassette [1000]")
     ap.add_argument("--out-junctions", required=True, help="junctions TSV")
     ap.add_argument("--out-insertions", required=True, help="insertion sites TSV")
     ap.add_argument("--out-counts", required=True, help="per-cassette read counts TSV")
+    ap.add_argument("--out-depth", default=None,
+                    help="depth along each cassette, all primary reads (depth_bins format)")
+    ap.add_argument("--depth-bin", type=int, default=10, help="bin size of --out-depth (bp) [10]")
     args = ap.parse_args()
     try:
         run(args)

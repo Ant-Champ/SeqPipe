@@ -589,6 +589,8 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `cassette_min_mapq` | 20 | evidence below this mapping quality cannot name the cassette |
 | `cassette_min_reads` | 2 | minimum reads for a junction |
 | `cassette_max_span` | 20000 | max distance between the two junctions of one site |
+| `cassette_min_clip` | 12 | short reads: a uniquely mapped genome read whose soft clip (≥ this) continues into a cassette is a junction read (most junction reads are only clipped, not split) |
+| `cassette_mate_window` | 1000 | short reads: when the junction reads only hit the ends cassettes share, the read pairs within this distance (genome mate) whose other mate is unique on a cassette name it |
 | `cassette_min_segment_*`, `cassette_cluster_tol_*` | 100/30, 20/10 | min aligned bp on each side of a junction; position tolerance (ONT / short) |
 | `igv_exe`, `igv_heap_mb`, `igv_flank` | —, 4000, 1000 | IGV launcher, Java heap, bp shown around a site. Snapshots also need `xvfb-run` on the node |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
@@ -616,6 +618,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `features` all `.` in annotated tables | the GenBank file has no features, or they are only of a skipped type (`annotate_skip_types`) |
 | very low `pct_mapped` | wrong reference for that sample, or contamination |
 | assembly says `# SKIPPED` | not enough data (< `flye_min_coverage` × reference length). Lower it to force a try |
+| reads on a cassette (`cassette_counts.tsv`) but no insertion site | read `<sample>/logs/find_cassette_insertions.log`: `evidence:` = junction reads found, `mate links` = genome positions whose mate is on a cassette. Mate links but no junction → send the log; no mate links at all → the cassette is not next to the reference genome (on a plasmid, or the sample has another reference) |
 | IGV snapshots fail | check `igv_exe` and that `xvfb-run` exists on the node (`which xvfb-run`). IGV is tried 3 times per sample, at most 4 IGVs run at once (`IGV_JOBS=2 ./run.sh ...` for fewer); if it still fails, the sample gets `igv_snapshots/IGV_FAILED.txt` with IGV's last output and the run goes on |
 | no IGV pictures, no error | `run_igv_snapshots` is `false` (the report says "IGV snapshots are off"). Set it to `true` (and `run_cassette_search: true`) |
 | a sample has a red "Low diversity" banner | too few bases for `min_theoretical_depth`: re-sequence, or lower `min_theoretical_depth` to force the analysis |

@@ -46,7 +46,8 @@ SECTIONS = [
     ("sv",        "Large indels & breakpoints", "sv",
      "Large indels from CIGARs and clipped-read breakpoint clusters."),
     ("cassettes", "Cassette insertions", "cassettes",
-     "Where each cassette of cassette_dir is inserted (junction reads), and the IGV snapshots."),
+     "Where each cassette of cassette_dir is inserted (junction reads), the depth along each cassette "
+     "(all reads, including those of the ends cassettes share) and the IGV snapshots."),
     ("plasmids",  "Plasmid panel", "plasmid_panel",
      "Breadth (% covered) and mean depth of every panel plasmid in every sample."),
     ("multimer",  "Plasmid multimers", "multimer",
@@ -271,6 +272,7 @@ def gather_sample(s, out_dir, tg, embed_igv):
         "reads": [x for x in (s.get("reads1"), s.get("reads2")) if x],
         "blocks": blocks, "events": events,
         "depth": read_depth(os.path.join(d, "coverage", name + ".depth_bins.tsv")),
+        "cdepth": read_depth(os.path.join(d, "cassettes", name + ".cassette_depth.tsv")) if tg.get("cassettes") else {},
     }
 
 
@@ -502,10 +504,10 @@ const PLOTS = {};
 const TRACK = { depth: 120, ev: 18, gene: 30, axis: 18 };
 const EVCOL = { lowcov: "--lowedge", highcov: "--highedge", cassette: "--cas", breakpoint: "--bp", indel: "--indel", variant: "--var" };
 
-function plot(sample, contig) {
-  const smp = D.samples[sample], dp = smp.depth[contig];
-  const genes = (D.genes[D.ref_of[sample]] || {})[contig] || [];
-  const ev = smp.events.filter(e => e[1] === contig);
+function plot(sample, contig, cassette = false) {
+  const smp = D.samples[sample], dp = (cassette ? smp.cdepth : smp.depth)[contig];
+  const genes = cassette ? [] : (D.genes[D.ref_of[sample]] || {})[contig] || [];
+  const ev = cassette ? [] : smp.events.filter(e => e[1] === contig);
   const sorted = dp.v.slice().sort((a, b) => a - b);
   const yMax = Math.max(1, sorted[Math.floor(sorted.length * 0.99)] * 1.15 || 1);
   const median = sorted[Math.floor(sorted.length / 2)] || 0;
@@ -592,7 +594,7 @@ function plot(sample, contig) {
   cv.addEventListener("dblclick", () => { st.a = 1; st.b = dp.len; draw(); });
   new ResizeObserver(() => draw()).observe(cv);
   const api = { box, show(a, b) { const w = Math.max(b - a + 1, 500) * 3; zoom((a + b) / 2, w); } };
-  PLOTS[sample + "\u0000" + contig] = api;
+  if (!cassette) PLOTS[sample + "\u0000" + contig] = api;
   return api;
 }
 
@@ -641,6 +643,10 @@ function sampleView(s) {
     const blocks = smp.blocks[sec.key] || [];
     out.push($("h3", { id: "s-" + sec.key }, sec.title));
     if (sec.key === "coverage") out.push($("p", { class: "desc" }, SEC.coverage.desc), ...plots(s));
+    if (sec.key === "cassettes" && smp.cdepth && Object.keys(smp.cdepth).length) {
+      out.push($("h4", {}, "Depth along each cassette"));
+      for (const c of Object.keys(smp.cdepth)) out.push(plot(s, c, true).box);
+    }
     for (const b of blocks) out.push(...block(b, s));
   }
   return out;
