@@ -437,6 +437,24 @@ Rule (step) names for `--forcerun` / `--until`:
     logs/<step>.log                   one log per step: look here when something fails
 ```
 
+### 5.0 Sharing the results (`run_share_bundle`, default on)
+
+The very last step gathers what the lab needs into `<out_dir>/share/`:
+
+```
+share/
+  bams/<sample>.bam, <sample>.bam.bai     every analysed sample (low-diversity samples have none)
+  references/<reference>.gb               one per reference, with the contig names the BAMs use
+  <run>_bams.tar                          bams/ in one file (BAMs are already compressed: not re-gzipped)
+  <run>_references.tar.gz
+  report.html, summary.tsv
+```
+
+`<run>` is the run folder's name. The files in `bams/` and `references/` are hard links to the
+pipeline's own files when the filesystem allows it, so they take no extra space; only the two
+archives do. Send the archives, or the whole `share/` folder (open a BAM in a genome browser
+with its reference `.gb`). `share_dir` puts it elsewhere; `run_share_bundle: false` skips it.
+
 ### 5.1 The HTML report
 
 `report.html` is one file: copy it to your PC and open it in any browser. It needs no internet
@@ -627,6 +645,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `picture_flank` | 1000 | bp shown on each side of a hotspot in its picture |
 | `picture_max_view`, `picture_max_per_sample` | 10000, 50 | widest picture (a longer hotspot is shown around its best junction); most pictures per sample |
 | `picture_debug` | false | also write `<picture>.png.reads.tsv`: every read fetched for the picture (name, flag, MAPQ, position, CIGAR, mate contig, SA, colour, drawn or not) |
+| `run_share_bundle`, `share_dir` | true, `<out_dir>/share/` | last step: every BAM + every reference `.gb` in one folder, with a `.tar` / `.tar.gz` of each, the report and summary (see 5.0) |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
 | `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
 | `report_embed_pictures` | true | put the hotspot pictures inside `report.html` (false: link to the PNG files) |

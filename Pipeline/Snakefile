@@ -78,6 +78,7 @@ RUN_DENOVO         = config.get("run_denovo_assembly", False)
 RUN_PLASMID_SCREEN = config.get("run_plasmid_screen", False)
 RUN_CASSETTES      = config.get("run_cassette_search", False)
 RUN_REPORT         = config.get("run_html_report", True)
+RUN_SHARE          = config.get("run_share_bundle", True)
 
 # Renamed keys (IGV was replaced by pictures drawn by the pipeline,
 # scripts/snapshot_regions.py): the old names are still read, with a warning.
@@ -309,6 +310,8 @@ if RUN_CASSETTES:
 include: "rules/summary.smk"
 if RUN_REPORT:
     include: "rules/report.smk"
+if RUN_SHARE:
+    include: "rules/share.smk"
 
 
 # ----------------------------------------------------------------------
@@ -352,6 +355,8 @@ def _rule_all_inputs(wildcards=None):
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"
     if RUN_REPORT:
         d["report"] = OUT_DIR + "report.html"
+    if RUN_SHARE:
+        d["share"] = [SHARE_DIR + RUN_NAME + "_bams.tar", SHARE_DIR + RUN_NAME + "_references.tar.gz"]
     return d
 
 
