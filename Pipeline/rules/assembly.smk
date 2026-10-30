@@ -18,7 +18,9 @@
 # so "too low" only means something relative to each sample's own
 # reference length. Both rules check that before calling the assembler
 # and skip cleanly (empty fasta/gfa, an explanatory assembly_info.txt
-# marked '# SKIPPED', exit 0) instead of failing the job.
+# marked '# SKIPPED', exit 0) instead of failing the job. An assembler that
+# exits with an error (e.g. Flye on a short amplicon) is marked '# FAILED' the
+# same way: the assembly is optional, the rest of the run goes on.
 #
 # Unicycler writes no assembly_info.txt: it is built from the contig
 # headers of assembly.fasta (">1 length=4641652 depth=1.00x circular=true")
@@ -74,9 +76,19 @@ rule assemble_ont:
             : > "{output.gfa}"
             exit 0
         fi
-        flye {params.read_mode} "{input.reads}" \
-             --out-dir "{output.asm_dir}" \
-             --threads {threads} >> "{log}" 2>&1
+        if ! flye {params.read_mode} "{input.reads}" \
+                  --out-dir "{output.asm_dir}" \
+                  --threads {threads} >> "{log}" 2>&1; then
+            # e.g. a short amplicon reference: "No disjointigs were assembled".
+            # An assembly is optional: mark it FAILED, keep the run going.
+            reason=$(grep -m1 "ERROR" "{log}" | sed 's/^.*ERROR:* *//' | cut -c1-200)
+            echo "FAILED: flye exited with an error (see above)" >> "{log}"
+            printf '#seq_name\tlength\tcov.\tcirc.\trepeat\tmult.\talt_group\tgraph_path\n' > "{output.info}"
+            printf '# FAILED: flye error: %s (see logs/assemble.log)\n' "${{reason:-unknown}}" >> "{output.info}"
+            : > "{output.fasta}"
+            : > "{output.gfa}"
+            exit 0
+        fi
         cp -- "{output.asm_dir}/assembly.fasta"     "{output.fasta}"
         cp -- "{output.asm_dir}/assembly_info.txt"  "{output.info}"
         cp -- "{output.asm_dir}/assembly_graph.gfa" "{output.gfa}"
@@ -120,10 +132,18 @@ rule assemble_sr:
             : > "{output.gfa}"
             exit 0
         fi
-        unicycler -1 "{input.r1}" -2 "{input.r2}" \
-                  -o "{output.asm_dir}" \
-                  -t {threads} \
-                  --mode {params.mode} >> "{log}" 2>&1
+        if ! unicycler -1 "{input.r1}" -2 "{input.r2}" \
+                       -o "{output.asm_dir}" \
+                       -t {threads} \
+                       --mode {params.mode} >> "{log}" 2>&1; then
+            reason=$(grep -m1 -i "error" "{log}" | cut -c1-200)
+            echo "FAILED: unicycler exited with an error (see above)" >> "{log}"
+            printf '#seq_name\tlength\tcov.\tcirc.\n' > "{output.info}"
+            printf '# FAILED: unicycler error: %s (see logs/assemble.log)\n' "${{reason:-unknown}}" >> "{output.info}"
+            : > "{output.fasta}"
+            : > "{output.gfa}"
+            exit 0
+        fi
         cp -- "{output.asm_dir}/assembly.fasta" "{output.fasta}"
         cp -- "{output.asm_dir}/assembly.gfa"   "{output.gfa}"
 

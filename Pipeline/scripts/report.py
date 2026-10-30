@@ -76,8 +76,9 @@ def read_table(path, keep=None):
         lines = [l.rstrip("\n").rstrip("\r") for l in fh if l.strip()]
     if not lines:
         return {"columns": [], "rows": [], "total": 0}
-    if lines[0].lstrip().startswith("# SKIPPED"):
-        return {"columns": [], "rows": [], "total": 0, "note": " ".join(l.lstrip("# ") for l in lines)}
+    marks = [l for l in lines if l.lstrip().startswith(("# SKIPPED", "# FAILED"))]
+    if marks:
+        return {"columns": [], "rows": [], "total": 0, "note": " ".join(l.lstrip("# ") for l in marks)}
     cols = lines[0].lstrip("#").split("\t")
     rows = [l.split("\t") for l in lines[1:] if not l.startswith("#")]
     if keep:

@@ -163,20 +163,22 @@ def multimer_summary(path):
 
 
 def assembly_stats(path):
-    """Flye assembly_info.txt -> (contigs, circular contigs) or 'skipped'."""
+    """Flye assembly_info.txt -> (contigs, circular contigs), or 'skipped' /
+    'failed' (a '# SKIPPED' / '# FAILED' line, after the header)."""
     contigs, circ = 0, 0
     with open(path) as fh:
-        first = fh.readline()
-        if first.lstrip().startswith("# SKIPPED"):
-            return "skipped", "skipped"
-        fh.seek(0)
-        for line in fh:
-            if not line.strip() or line.startswith("#"):
-                continue
-            f = line.rstrip("\n").split("\t")
-            contigs += 1
-            if len(f) > 3 and f[3].strip().upper() in ("Y", "+", "YES", "TRUE"):
-                circ += 1
+        lines = fh.readlines()
+    for line in lines:
+        for mark in ("SKIPPED", "FAILED"):
+            if line.lstrip().startswith("# " + mark):
+                return mark.lower(), mark.lower()
+    for line in lines:
+        if not line.strip() or line.startswith("#"):
+            continue
+        f = line.rstrip("\n").split("\t")
+        contigs += 1
+        if len(f) > 3 and f[3].strip().upper() in ("Y", "+", "YES", "TRUE"):
+            circ += 1
     return contigs, circ
 
 
