@@ -22,6 +22,12 @@
 # exits with an error (e.g. Flye on a short amplicon) is marked '# FAILED' the
 # same way: the assembly is optional, the rest of the run goes on.
 #
+# ONT: the assembler gets at most assembly_max_depth x the reference length
+# of reads (rule assembly_reads_ont: filtlong keeps the longest / best ones).
+# A plasmid often has thousands of x of coverage; Flye's run time grows with
+# the reads, its result does not improve above ~100x. Alignment and variant
+# calling still use every filtered read. assembly_max_depth: 0 = all reads.
+#
 # Unicycler writes no assembly_info.txt: it is built from the contig
 # headers of assembly.fasta (">1 length=4641652 depth=1.00x circular=true")
 # with the columns  #seq_name  length  cov.  circ.
@@ -41,9 +47,36 @@ def unicycler_min_bases(wildcards):
     return int(ref_length(wildcards.sample) * cov)
 
 
+rule assembly_reads_ont:
+    """Reads given to Flye: at most assembly_max_depth x the reference length,
+    the longest / highest-quality first (filtlong --target_bases)."""
+    input:
+        OUT_DIR + "{sample}/{sample}.filt.fastq.gz",
+    output:
+        temp(OUT_DIR + "{sample}/{sample}.assembly_reads.fastq.gz"),
+    wildcard_constraints:
+        sample = ONT_RE,
+    log:
+        OUT_DIR + "{sample}/logs/assembly_reads.log",
+    params:
+        target = lambda wc: int(ref_length(wc.sample) * config.get("assembly_max_depth", 100)),
+    conda:
+        "../envs/qc.yaml"
+    shell:
+        r"""
+        set -euo pipefail
+        if [ {params.target} -gt 0 ]; then
+            filtlong --target_bases {params.target} "{input}" 2> "{log}" | gzip -1 > "{output}"
+        else
+            cp -L -- "{input}" "{output}"
+            echo "assembly_max_depth is 0: every filtered read" > "{log}"
+        fi
+        """
+
+
 rule assemble_ont:
     input:
-        reads = OUT_DIR + "{sample}/{sample}.filt.fastq.gz",
+        reads = OUT_DIR + "{sample}/{sample}.assembly_reads.fastq.gz",
     output:
         asm_dir = directory(OUT_DIR + "{sample}/assembly"),
         fasta   = OUT_DIR + "{sample}/{sample}.assembly.fasta",

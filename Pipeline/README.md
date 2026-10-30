@@ -631,6 +631,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `sv_ignore_contig_ends` | 10 | ignore breakpoints at the very ends of a replicon (circular origin) |
 | `multimer_*` | see file | multimer calling thresholds (ONT) |
 | `flye_read_mode` | `--nano-raw` | `--nano-hq` for recent (R10, SUP) basecalls |
+| `assembly_max_depth` | 100 | ONT assembly: Flye gets at most this × the reference length of reads, the longest / best first (filtlong). Plasmids often have thousands of × and assemble much faster; alignment and variants still use every read. 0 = all reads |
 | `flye_min_coverage` | 10 | skip assembly below this × reference length (clearly labelled, does not fail) |
 | `unicycler_mode` | `normal` | `conservative` / `normal` / `bold` |
 | `plasmid_panel_dir` | — | folder with the panel plasmids: `.gb/.gbk/.genbank/.fasta/.fa/.fna`, one plasmid per file (named after the file) or several records per file (`file_recordid`). Use an absolute path: a relative one is read from the config's folder. Checked at start-up |

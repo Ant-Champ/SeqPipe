@@ -134,6 +134,7 @@ multimer_column_name  : "multimer"   # name of the column added to the annotated
 # Samples with several replicons (chromosome + plasmid) give several contigs:
 # see <sample>.assembly_info.txt.
 flye_read_mode   : "--nano-raw"  # --nano-raw | --nano-hq | --nano-corr (match your basecaller)
+assembly_max_depth : 100 # ONT assembly: at most this x reference length of reads (longest/best first); 0 = all. Plasmids get far more: much faster
 flye_threads     : 8
 flye_mem_mb      : 16000
 flye_min_coverage: 10            # skip (clearly-labelled empty result) below this x reference length
