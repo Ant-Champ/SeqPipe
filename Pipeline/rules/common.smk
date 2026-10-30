@@ -177,7 +177,10 @@ rule stage_reads_sr:
 
 rule stage_ref:
     """The sample's GenBank reference, with usable contig names (see
-    safe_record_names): every later step takes its contig names from here."""
+    safe_record_names): every later step takes its contig names from here.
+    The file is copied as it is; only the ACCESSION / VERSION lines of a record
+    with an unusable name are replaced (no Biopython rewrite, which rejects
+    some exports)."""
     input:
         sample_ref_gb,
     output:
@@ -185,17 +188,41 @@ rule stage_ref:
     log:
         OUT_DIR + "{sample}/logs/stage_ref.log",
     run:
-        import warnings
-        from Bio import SeqIO, BiopythonWarning
-        records = list(SeqIO.parse(input[0], "genbank"))
-        changed = safe_record_names(records)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", BiopythonWarning)     # long LOCUS names
-            SeqIO.write(records, output[0], "genbank")
-        with open(log[0], "w") as fh:
-            fh.write(f"{len(records)} record(s): {', '.join(r.id for r in records)}\n")
-            for old, new in changed:
-                fh.write(f"renamed contig '{old}' -> '{new}' (unusable name in {input[0]})\n")
+        import traceback
+        from Bio import SeqIO
+        with open(log[0], "w") as lg:
+            try:
+                records = list(SeqIO.parse(input[0], "genbank"))
+                if not records:
+                    raise ValueError(f"no GenBank record in {input[0]}")
+                old_ids = [r.id for r in records]
+                safe_record_names(records)
+                new_ids = [r.id for r in records]
+                n, out = -1, []
+                with open(input[0]) as fh:
+                    for line in fh:
+                        if line.startswith("LOCUS"):
+                            n += 1
+                            out.append(line)
+                            if n < len(records) and new_ids[n] != old_ids[n]:
+                                out.append(f"ACCESSION   {new_ids[n]}\nVERSION     {new_ids[n]}\n")
+                            continue
+                        if (0 <= n < len(records) and new_ids[n] != old_ids[n]
+                                and line.startswith(("ACCESSION", "VERSION"))):
+                            continue                          # replaced right after LOCUS
+                        out.append(line)
+                with open(output[0], "w") as fh:
+                    fh.writelines(out)
+                back = [r.id for r in SeqIO.parse(output[0], "genbank")]
+                if back != new_ids:
+                    raise ValueError(f"renaming did not work: {back} instead of {new_ids}")
+                lg.write(f"{len(records)} record(s): {', '.join(new_ids)}\n")
+                for o, nw in zip(old_ids, new_ids):
+                    if o != nw:
+                        lg.write(f"renamed contig '{o}' -> '{nw}' (unusable name in {input[0]})\n")
+            except Exception:
+                lg.write(traceback.format_exc())
+                raise
 
 
 rule genbank_to_fasta:
