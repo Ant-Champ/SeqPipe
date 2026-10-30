@@ -265,10 +265,34 @@ if _clash:
         "these samples share split FASTQ parts (same folder and file prefix), so they would be "
         f"merged together: {', '.join(_clash)}. Rename the files, put them in separate folders, or "
         "set merge_split_fastq: false.")
-for _s, _ps in ONT_PARTS.items():
-    if len(_ps) > 1:
-        print(f"{_s}: {len(_ps)} split FASTQ parts will be merged "
-              f"({os.path.basename(_ps[0])} ... {os.path.basename(_ps[-1])})", file=sys.stderr)
+# snakemake re-reads this file for every job it runs: messages and checks
+# below only in the main process
+_MAIN_PROCESS = "--target-jobs" not in sys.argv
+if _MAIN_PROCESS:
+    for _s, _ps in ONT_PARTS.items():
+        if len(_ps) > 1:
+            print(f"{_s}: {len(_ps)} split FASTQ parts will be merged "
+                  f"({os.path.basename(_ps[0])} ... {os.path.basename(_ps[-1])})", file=sys.stderr)
+
+# Input files dated in the future (copied with their dates from a computer
+# whose clock is ahead) make every new output "older than its input": snakemake
+# stops with "clock skew" on each job. Catch it once, with the fix.
+if _MAIN_PROCESS:
+    import time as _time
+    _inputs = {_ref_path(samples.at[s, "reference"]) for s in SAMPLE_NAMES}
+    _inputs |= {p for ps in ONT_PARTS.values() for p in ps}
+    _inputs |= {samples.at[s, c] for s in SR_SAMPLES for c in ("reads1", "reads2")}
+    _inputs |= {c["path"] for c in CASSETTES + PLASMID_PANEL}
+    _now = _time.time()
+    _future = sorted(p for p in _inputs if os.path.exists(p) and os.path.getmtime(p) > _now + 60)
+    if _future:
+        _dirs = sorted({os.path.dirname(os.path.abspath(p)) for p in _future})
+        raise WorkflowError(
+            f"{len(_future)} input file(s) are dated in the future (e.g. {_future[0]}: "
+            f"{_time.strftime('%Y-%m-%d %H:%M', _time.localtime(os.path.getmtime(_future[0])))}, "
+            f"now {_time.strftime('%Y-%m-%d %H:%M')}): they were copied with the dates of a computer "
+            "whose clock is ahead. Set them to the current time, then run again:\n"
+            + "\n".join(f"    find {d} -newermt now -exec touch {{}} +" for d in _dirs))
 
 
 # ----------------------------------------------------------------------
