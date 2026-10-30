@@ -92,11 +92,17 @@ cmd=(snakemake
 # Compute nodes have no internet: an environment missing there makes conda wait
 # forever (the run "stalls" when it reaches that step). Check before starting.
 if [ "$mode" != setup ] && [ "$dry" = no ]; then
-    missing=$(snakemake --snakefile "$PIPELINE_DIR/Snakefile" --configfile "$config" --directory "$run_dir" \
-                  --use-conda --conda-prefix "$CONDA_ENVS_DIR" --cores 1 --list-conda-envs \
-                  --config min_theoretical_depth=0 2>/dev/null \
-              | awk -F'\t' 'NR > 1 && NF >= 3 && $3 != "" { print $1 "\t" $3 }' \
-              | while IFS=$'\t' read -r env loc; do [ -d "$loc" ] || echo "  $(basename "$env")"; done)
+    # (a failure here must be shown, not end the script silently: set -e / pipefail)
+    if ! envlist=$(snakemake --snakefile "$PIPELINE_DIR/Snakefile" --configfile "$config" --directory "$run_dir" \
+                       --use-conda --conda-prefix "$CONDA_ENVS_DIR" --cores 1 --list-conda-envs \
+                       --config min_theoretical_depth=0 2>&1); then
+        echo "ERROR: snakemake could not read the workflow (config, sample sheet, references...):" >&2
+        printf '%s\n' "$envlist" | grep -v "^Building DAG\|^Assuming unrestricted\|^host:" | tail -n 40 >&2
+        exit 1
+    fi
+    missing=$(printf '%s\n' "$envlist" \
+              | awk -F'\t' 'NF >= 3 && $1 != "environment" && $3 ~ /\// { print $1 "\t" $3 }' \
+              | while IFS=$'\t' read -r env loc; do [ -d "$loc" ] || echo "  $(basename "$env")"; done || true)
     if [ -n "$missing" ]; then
         cat >&2 <<EOF
 ERROR: these conda environments are not built yet:
