@@ -493,6 +493,17 @@ To use the plots:
 Tables can be sorted (click a column header) and filtered (type in the box). A table keeps its
 first 5000 rows; the TSV on disk is complete.
 
+**Reads in the coverage plots** (`report_reads`). Zoom a plot below 10 kb and the reads appear
+under it, stacked as in a genome browser (at most 40 rows): grey reads (bluish = reverse strand,
+pale = MAPQ < 20), mismatches coloured by base (A green, C blue, G orange, T red), deletions as a
+black line, insertions as a purple tick, soft clips in red. Below 150 bp the reference bases are
+shown on top. Hovering gives the bases of the reads at that position (`reads: A 37 (ref G)`).
+Clicking a variant / indel / breakpoint mark on a plot, or a row of a table, shows it ± 200 bp.
+For references up to 200 kb (plasmids, phages, PCR products) the reads cover the whole
+reference; for larger genomes they are kept ± 500 bp around every variant, indel, breakpoint,
+coverage edge and cassette site (elsewhere the plot says "no reads stored here"). Only what
+differs from the reference is stored, so this adds ~0.1–0.5 MB per sample to `report.html`.
+
 The hotspot pictures appear when `run_hotspot_pictures` is on. They are embedded in the file;
 set `report_embed_pictures: false` to link to the PNG files instead and keep `report.html` small. The
 links to the fastp reports and the assemblies are relative, so they only work if `report.html`
@@ -649,6 +660,8 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | `run_share_bundle`, `share_dir` | true, `<out_dir>/share/` | last step: every BAM + every reference `.gb` in one folder, with a `.tar` / `.tar.gz` of each, the report and summary (see 5.0) |
 | `run_html_report` | true | write `<out_dir>/report.html` (see 5.1) |
 | `report_max_bins` | 20000 | depth points per replicon in the report plots (a 4.6 Mb genome → 230 bp per point) |
+| `report_reads` | true | a sample of the aligned reads inside the report: zoom a coverage plot below 10 kb to see them (see 5.1) |
+| `report_reads_whole_ref_max`, `report_reads_flank`, `report_reads_max_rows` | 200000, 500, 40 | references up to this size get reads everywhere, larger ones ± `report_reads_flank` bp around every event; rows of reads |
 | `report_embed_pictures` | true | put the hotspot pictures inside `report.html` (false: link to the PNG files) |
 | `*_threads`, `*_mem_mb` | see file | per-job resources inside the allocation |
 

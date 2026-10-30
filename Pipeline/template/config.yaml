@@ -184,6 +184,10 @@ share_dir : ""          # "" = <out_dir>/share/
 
 # --- HTML report (run_html_report) ----------------------------------------
 report_max_bins  : 20000  # depth points per replicon in the plots (4.6 Mb genome -> 230 bp per point)
+report_reads          : true   # reads in the coverage plots when zoomed in (< 10 kb): mismatches, indels, clips
+report_reads_whole_ref_max : 200000   # references up to this size (bp) get reads everywhere; larger ones around events only
+report_reads_flank    : 500    # ... +/- this many bp around each variant / indel / breakpoint / coverage edge / cassette site
+report_reads_max_rows : 40     # reads stacked at most this deep
 report_embed_pictures : true   # hotspot pictures inside report.html (false: links to the PNGs, smaller file)
 
 # --- analysis scripts (optional) -------------------------------------------
@@ -197,5 +201,6 @@ report_embed_pictures : true   # hotspot pictures inside report.html (false: lin
 #   annotate_regions: annotate_regions.py coverage_summary: aggregate_coverage.1.py
 #   find_cassette_insertions: find_cassette_insertions.py
 #   snapshot_regions: snapshot_regions.py mappability: mappability.py
+#   read_snippets: read_snippets.py
 script_dir : ""
 script: {}               # e.g.  script: {simplify: "simplify.5.py"}

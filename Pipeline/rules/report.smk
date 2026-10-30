@@ -45,11 +45,58 @@ rule depth_profile:
         """
 
 
+RUN_REPORT_READS = config.get("report_reads", True)
+
+
+def _read_event_tables(wildcards):
+    """Tables whose positions get reads in the report (larger references)."""
+    s, ann = wildcards.sample, OUT_DIR + "{0}/annotated/{0}".format(wildcards.sample)
+    t = []
+    if RUN_VARIANTS:
+        t.append(OUT_DIR + f"{s}/{s}.simple.tsv")
+    if RUN_SV:
+        t += [ann + ".indels.annotated.tsv", ann + ".breakpoints.annotated.tsv"]
+    if RUN_COVERAGE:
+        t += [ann + ".low_coverage.annotated.tsv", ann + ".high_coverage.annotated.tsv"]
+    if RUN_CASSETTES:
+        t += [ann + ".cassette_hotspots.annotated.tsv", ann + ".cassette_insertions.annotated.tsv"]
+    return t
+
+
+rule read_snippets:
+    """A browser-style sample of the aligned reads for the report: the whole
+    reference when small (plasmids...), else windows around every event."""
+    input:
+        bam    = OUT_DIR + "{sample}/{sample}.sorted.bam",
+        bai    = OUT_DIR + "{sample}/{sample}.sorted.bam.bai",
+        fasta  = OUT_DIR + "{sample}/{sample}.ref.fasta",
+        fai    = OUT_DIR + "{sample}/{sample}.ref.fasta.fai",
+        events = _read_event_tables,
+    output:
+        OUT_DIR + "{sample}/coverage/{sample}.reads.json",
+    log:
+        OUT_DIR + "{sample}/logs/read_snippets.log",
+    params:
+        exe       = script_path("read_snippets", "read_snippets.py"),
+        whole_max = config.get("report_reads_whole_ref_max", 200000),
+        flank     = config.get("report_reads_flank", 500),
+        max_rows  = config.get("report_reads_max_rows", 40),
+        min_mapq  = config.get("min_mapq", 20),
+    conda:
+        "../envs/regions.yaml"
+    shell:
+        "python {params.exe} --bam {input.bam} --fasta {input.fasta} --events {input.events} "
+        "--out {output} --whole-ref-max {params.whole_max} --flank {params.flank} "
+        "--max-rows {params.max_rows} --min-mapq {params.min_mapq} > {log} 2>&1"
+
+
 def _report_inputs(wildcards=None):
     d = dict(_run_summary_inputs())
     OK = ok_samples()
     d["summary"] = OUT_DIR + "summary.tsv"
     d["depth"] = expand(OUT_DIR + "{sample}/coverage/{sample}.depth_bins.tsv", sample=OK)
+    if RUN_REPORT_READS:
+        d["reads"] = expand(OUT_DIR + "{sample}/coverage/{sample}.reads.json", sample=OK)
     d["ref_gb"] = expand(OUT_DIR + "{sample}/{sample}.ref.gb", sample=SAMPLE_NAMES)
     if RUN_COVERAGE or RUN_PLASMID_SCREEN:
         d["coverage_summary"] = OUT_DIR + "coverage_summary.tsv"

@@ -89,6 +89,17 @@ def read_table(path, keep=None):
     return t
 
 
+def read_json(path):
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except ValueError as err:
+        log("WARNING: %s: %s" % (path, err))
+        return {}
+
+
 def read_text(path):
     if not path or not os.path.isfile(path):
         return None
@@ -274,6 +285,7 @@ def gather_sample(s, out_dir, tg, embed_pictures):
         "reads": [x for x in (s.get("reads1"), s.get("reads2")) if x],
         "blocks": blocks, "events": events,
         "depth": read_depth(os.path.join(d, "coverage", name + ".depth_bins.tsv")),
+        "aln": read_json(os.path.join(d, "coverage", name + ".reads.json")),
         "cdepth": read_depth(os.path.join(d, "cassettes", name + ".cassette_depth.tsv")) if tg.get("cassettes") else {},
     }
 
@@ -350,9 +362,9 @@ PAGE = r"""<!doctype html>
 <style>
 :root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5d8a;
  --depth:#4a7fb5;--low:rgba(214,64,52,.18);--lowedge:#d64034;--high:rgba(23,150,150,.2);--highedge:#179696;--cas:#2e9e5b;--bp:#e08a1e;--indel:#8a4fc2;--var:#1d1d1b;
- --hot:#8fcf9f;--gene:#9aa4ae;--good:#2e9e5b;--warn:#d9a21b;--bad:#d64034;--chip:#eef2f6}
+ --hot:#8fcf9f;--read:#bcc3ca;--readrev:#aab6c4;--readlow:#dfe3e7;--gene:#9aa4ae;--good:#2e9e5b;--warn:#d9a21b;--bad:#d64034;--chip:#eef2f6}
 @media (prefers-color-scheme: dark){:root{--bg:#161615;--panel:#1f1f1e;--ink:#ecebe6;--muted:#9c9b95;--line:#33332f;
- --accent:#8db6e0;--depth:#6f9fd1;--low:rgba(240,100,90,.22);--var:#ecebe6;--gene:#6c7680;--chip:#26303a}}
+ --read:#59626c;--readrev:#56657a;--readlow:#383d43;--accent:#8db6e0;--depth:#6f9fd1;--low:rgba(240,100,90,.22);--var:#ecebe6;--gene:#6c7680;--chip:#26303a}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);
@@ -533,12 +545,15 @@ function combined(secKey, title) {
 // ---------------------------------------------------------------- coverage plot
 const PLOTS = {};
 const TRACK = { depth: 120, ev: 18, gene: 30, axis: 18 };
+const READ_ZOOM = 10000, ROW_H = 6, BASES_ZOOM = 150;          // reads below 10 kb, reference bases below 150 bp
+const BASECOL = ["#2e9e5b", "#2f6fb5", "#d9881b", "#d64034", "#8a8a8a"], BASEC = "ACGTN";
 const EVCOL = { lowcov: "--lowedge", highcov: "--highedge", cassette: "--cas", hotspot: "--hot", breakpoint: "--bp", indel: "--indel", variant: "--var" };
 
 function plot(sample, contig, cassette = false) {
   const smp = D.samples[sample], dp = (cassette ? smp.cdepth : smp.depth)[contig];
   const genes = (cassette ? D.cassette_genes || {} : D.genes[D.ref_of[sample]] || {})[contig] || [];
   const ev = cassette ? [] : smp.events.filter(e => e[1] === contig);
+  const rd = cassette ? null : (smp.aln || {})[contig];         // read snippets (read_snippets.py)
   const sorted = dp.v.slice().sort((a, b) => a - b);
   const yMax = Math.max(1, sorted[Math.floor(sorted.length * 0.99)] * 1.15 || 1);
   const median = sorted[Math.floor(sorted.length / 2)] || 0;
@@ -552,13 +567,72 @@ function plot(sample, contig, cassette = false) {
   const hot = ev.filter(e => e[0] === "hotspot");
   if (hot.length) box.append($("div", { class: "hotlist" }, $("b", {}, `Cassette hotspots (${hot.length}): `),
     hot.map(e => $("a", { onclick: () => api.show(e[2], e[3]) }, `${e[4].split(" ")[0]} @ ${e[2].toLocaleString()}`))));
-  const H = TRACK.depth + TRACK.ev + TRACK.gene + TRACK.axis;
+  let H = TRACK.depth + TRACK.ev + TRACK.gene + TRACK.axis;
+  const RY = TRACK.depth + TRACK.ev + TRACK.gene;               // top of the read track
+  // reads are shown when zoomed in and the view overlaps a stored window
+  const readsHere = () => rd && st.b - st.a < READ_ZOOM && rd.windows.some(w => w[1] >= st.a && w[0] <= st.b);
+  const refBase = p => { for (const [s0, seq] of rd.ref) if (p >= s0 && p < s0 + seq.length) return seq[p - s0]; return "N"; };
+  function readsH() {
+    if (!rd) return 0;
+    if (!readsHere()) return 16;                                 // one line of hint
+    return (st.b - st.a < BASES_ZOOM ? 14 : 0) + rd.rows * (ROW_H + 1) + 6;
+  }
+  function drawReads(g) {
+    g.font = "10px system-ui"; g.fillStyle = css("--muted");
+    if (!readsHere()) {
+      g.fillText(st.b - st.a >= READ_ZOOM ? "zoom below 10 kb to see the reads"
+        : "no reads stored here (for a large reference, reads are kept around variants and other events)", 2, RY + 11);
+      return;
+    }
+    let y0 = RY + 2;
+    const bp = W / (st.b - st.a + 1);
+    if (st.b - st.a < BASES_ZOOM) {                               // reference bases
+      g.font = "bold 10px ui-monospace,monospace"; g.textAlign = "center";
+      for (let p = st.a; p <= st.b; p++) { const b = refBase(p); g.fillStyle = BASECOL[BASEC.indexOf(b)] || css("--muted"); g.fillText(b, X(p) + bp / 2, y0 + 9); }
+      g.textAlign = "start"; y0 += 14;
+    }
+    for (const r of rd.reads) {
+      const [row, s0, e0, fl, lc, rc] = r;
+      if (e0 + rc < st.a || s0 - lc > st.b) continue;
+      const y = y0 + row * (ROW_H + 1);
+      g.fillStyle = css(fl & 2 ? "--readlow" : fl & 1 ? "--readrev" : "--read");
+      g.fillRect(X(s0), y, Math.max(1, X(e0 + 1) - X(s0)), ROW_H);
+      g.fillStyle = css("--bad"); g.globalAlpha = .55;            // soft clips
+      if (lc) g.fillRect(X(s0 - lc), y, X(s0) - X(s0 - lc), ROW_H);
+      if (rc) g.fillRect(X(e0 + 1), y, X(e0 + 1 + rc) - X(e0 + 1), ROW_H);
+      g.globalAlpha = 1;
+      for (let i = 6; i < r.length; i += 3) {
+        const t = r[i], p = r[i + 1], v = r[i + 2];
+        if (p > st.b || (t === 2 ? p + v : p + 1) < st.a) continue;
+        if (t === 0) { g.fillStyle = BASECOL[v]; g.fillRect(X(p), y, Math.max(1.5, bp), ROW_H); }
+        else if (t === 2) { g.fillStyle = css("--panel"); g.fillRect(X(p), y, Math.max(1, X(p + v) - X(p)), ROW_H);
+                            g.fillStyle = css("--ink"); g.fillRect(X(p), y + ROW_H / 2 - .5, Math.max(1, X(p + v) - X(p)), 1); }
+        else { g.fillStyle = css("--indel"); g.fillRect(X(p + 1) - 1, y - 1, 2, ROW_H + 2); }
+      }
+    }
+  }
+  function readCounts(p) {                                       // bases of the drawn reads at p
+    const n = {}, ref = refBase(p);
+    for (const r of rd.reads) {
+      if (r[1] > p || r[2] < p) continue;
+      let b = ref;
+      for (let i = 6; i < r.length; i += 3) {
+        const t = r[i], q = r[i + 1], v = r[i + 2];
+        if (t === 0 && q === p) { b = BASEC[v]; break; }
+        if (t === 2 && q <= p && p < q + v) { b = "del"; break; }
+      }
+      n[b] = (n[b] || 0) + 1;
+    }
+    const k = Object.keys(n).sort((a, b) => n[b] - n[a]);
+    return k.length ? `<br>reads: ${k.map(b => `${b === ref ? "<b>" + b + "</b>" : b} ${n[b]}`).join(" · ")} (ref ${ref})` : "";
+  }
   let W = 800, drag = null;
-  function zoom(c, w) { w = Math.max(w, Math.min(200, dp.len)); st.a = Math.max(1, Math.round(c - w / 2)); st.b = Math.min(dp.len, Math.round(st.a + w)); draw(); }
+  function zoom(c, w) { w = Math.max(w, Math.min(60, dp.len)); st.a = Math.max(1, Math.round(c - w / 2)); st.b = Math.min(dp.len, Math.round(st.a + w)); draw(); }
   const X = p => (p - st.a) / (st.b - st.a + 1) * W;
   const P = x => st.a + x / W * (st.b - st.a + 1);
   function draw(sel) {
     W = cv.clientWidth || 800; const r = devicePixelRatio || 1;
+    H = TRACK.depth + TRACK.ev + TRACK.gene + readsH() + TRACK.axis;
     cv.width = W * r; cv.height = H * r; cv.style.height = H + "px";
     const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, W, H);
     pos.textContent = `${contig}:${st.a.toLocaleString()}-${st.b.toLocaleString()} (${fmtBp(st.b - st.a + 1)})`;
@@ -618,33 +692,46 @@ function plot(sample, contig, cassette = false) {
         if (w > g.measureText(ge[3]).width + 4) { g.fillStyle = css("--ink"); g.fillText(ge[3], x0 + 2, gy + 24); }
       }
     } else { g.fillStyle = css("--muted"); g.font = "10px system-ui"; g.fillText(`${genes.length} genes (zoom below 300 kb to see them)`, 2, gy + 12); }
+    if (rd) drawReads(g);
     // axis
     const ay = H - TRACK.axis + 12, step = niceStep(span / Math.max(2, W / 110));
     g.fillStyle = css("--muted"); g.font = "10px system-ui";
-    for (let p = Math.ceil(st.a / step) * step; p <= st.b; p += step) { const x = X(p); g.fillRect(x, ay - 12, 1, 4); g.fillText(fmtBp(p), x + 2, ay); }
+    for (let p = Math.ceil(st.a / step) * step; p <= st.b; p += step) { const x = X(p); g.fillRect(x, ay - 12, 1, 4); g.fillText(span < 20000 ? p.toLocaleString() : fmtBp(p), x + 2, ay); }
     if (sel) { g.fillStyle = "rgba(47,93,138,.18)"; g.fillRect(Math.min(sel[0], sel[1]), 0, Math.abs(sel[1] - sel[0]), H); }
   }
   function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); for (const m of [1, 2, 5, 10]) if (m * p >= raw) return m * p; return 10 * p; }
   const tip = document.getElementById("tip");
-  cv.addEventListener("mousedown", e => { drag = [e.offsetX, e.offsetX]; });
+  let downY = 0;
+  cv.addEventListener("mousedown", e => { drag = [e.offsetX, e.offsetX]; downY = e.offsetY; });
   cv.addEventListener("mousemove", e => {
     if (drag) { drag[1] = e.offsetX; draw(drag); return; }
-    const p = Math.round(P(e.offsetX)), i = Math.min(dp.v.length - 1, Math.floor((p - 1) / dp.bin));
+    const p = Math.floor(P(e.offsetX)), i = Math.min(dp.v.length - 1, Math.floor((p - 1) / dp.bin));  // base p spans X(p)..X(p+1)
     const here = ev.filter(x => x[2] - (st.b - st.a) / W * 3 <= p && x[3] + (st.b - st.a) / W * 3 >= p);
     const gs = genes.filter(x => x[0] <= p && x[1] >= p);
     tip.innerHTML = `<b>${contig}:${p.toLocaleString()}</b><br>depth ≈ ${dp.v[i]}×` +
       gs.map(x => `<br>gene <b>${x[3]}</b> ${x[4] ? "– " + x[4] : ""}`).join("") +
-      here.map(x => `<br><span style="color:${css(EVCOL[x[0]])}">■</span> ${x[0]} ${x[2]}-${x[3]} ${x[4]}`).join("");
+      here.map(x => `<br><span style="color:${css(EVCOL[x[0]])}">■</span> ${x[0]} ${x[2]}-${x[3]} ${x[4]}`).join("") +
+      (readsHere() ? readCounts(p) : "") +
+      (here.some(x => ["variant", "indel", "breakpoint"].includes(x[0])) ? '<br><i>click: zoom to it ± 200 bp</i>' : "");
     tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - 370) + "px"; tip.style.top = (e.clientY + 14) + "px";
   });
   cv.addEventListener("mouseleave", () => { tip.style.display = "none"; });
   addEventListener("mouseup", e => {
     if (!drag) return; const [x0, x1] = drag.sort((a, b) => a - b); drag = null;
-    if (x1 - x0 > 4) { const a = P(x0), b = P(x1); zoom((a + b) / 2, b - a); } else draw();
+    if (x1 - x0 > 4) { const a = P(x0), b = P(x1); zoom((a + b) / 2, b - a); return; }
+    // a click on a variant / indel / breakpoint mark: zoom to it +/- 200 bp
+    if (downY <= TRACK.depth + TRACK.ev) {
+      const p = P(x0), tol = (st.b - st.a) / W * 4;
+      const hit = ev.filter(x => ["variant", "indel", "breakpoint"].includes(x[0]) && x[2] - tol <= p && x[3] + tol >= p)
+                    .sort((u, v) => Math.abs((u[2] + u[3]) / 2 - p) - Math.abs((v[2] + v[3]) / 2 - p))[0];
+      if (hit) { api.show(hit[2], hit[3]); return; }
+    }
+    draw();
   });
   cv.addEventListener("dblclick", () => { st.a = 1; st.b = dp.len; draw(); });
   new ResizeObserver(() => draw()).observe(cv);
-  const api = { box, show(a, b) { const w = Math.max(b - a + 1, 500) * 3; zoom((a + b) / 2, w); } };
+  // show a region with 200 bp on each side (variants, table rows, hotspots)
+  const api = { box, show(a, b) { zoom((a + b) / 2, b - a + 1 + 400); }, view(a, b) { zoom((a + b) / 2, b - a + 1); } };
   if (!cassette) PLOTS[sample + "\u0000" + contig] = api;
   return api;
 }
