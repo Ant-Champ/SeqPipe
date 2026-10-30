@@ -31,6 +31,7 @@ run_html_report       : true    # <out_dir>/report.html: every result by sample 
 
 # --- general ------------------------------------------------------------
 stage_mode : "symlink"   # symlink (saves disk) | copy -- how raw FASTQs are brought into out_dir
+merge_split_fastq : true # ONT: reads1 = any part of a split FASTQ (<prefix>_0.fastq.gz, _1, ...): all parts are merged
 min_mapq   : 20          # minimum mapping quality (low coverage, SV scan, short-read variant calling)
 
 # --- depth check (low diversity) -----------------------------------------

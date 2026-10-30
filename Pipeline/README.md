@@ -241,6 +241,16 @@ To fill the ONT column quickly, list the files with full paths:
 ls -1 /full/path/to/fastq_pass/*.fastq.gz
 ```
 
+**Split ONT FASTQ.** MinKNOW often writes one file per batch, e.g.
+`fastq/barcode47/BCN137_pass_barcode47_be08c322_0dd1f196_0.fastq.gz` … `_23.fastq.gz`. Put **any
+one** of them in `reads1`: every file of that folder with the same name up to the last `_<number>`
+and the same extension is merged, in numeric order (0, 1, 2 … 23), into the sample's
+`<out_dir>/<sample>/<sample>.fastq.gz` before anything else runs. The run prints
+`<sample>: 24 split FASTQ parts will be merged (…)` at start-up, and
+`<sample>/logs/stage_reads.log` lists the parts. Your original files are never changed or deleted.
+Two samples whose files share the same folder and prefix stop the run with an error, rather than
+being merged together. `merge_split_fastq: false` turns this off.
+
 - Many editors replace tabs with spaces. Check with `cat -A sample_sheet.tsv`: tabs show as `^I`.
 - Lines starting with `#` are ignored.
 - Old ONT sheets with `barcode` / `ref_fasta` columns are no longer accepted. The pipeline stops
@@ -580,6 +590,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 | key | default | meaning |
 |---|---|---|
 | `stage_mode` | `symlink` | `copy` puts the raw FASTQs inside `out_dir` |
+| `merge_split_fastq` | true | ONT: a `reads1` named `<prefix>_<number>.fastq(.gz)` is merged with all its sibling parts (see 3.1) |
 | `min_mapq` | 20 | min mapping quality for low coverage, SV scan, bcftools |
 | `filter_mode` | `best95per` | ONT: `best95per`, `best95per_max100x` (also caps at 100× the reference length) or `none` |
 | `filtlong_min_length`, `filtlong_keep_percent` | 500, 95 | ONT filtering |

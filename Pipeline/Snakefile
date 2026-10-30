@@ -227,6 +227,50 @@ SR_SAMPLES   = [s for s in SAMPLE_NAMES if samples.at[s, "platform"] != "ont"]
 
 
 # ----------------------------------------------------------------------
+# Split ONT FASTQ (MinKNOW writes one file per batch: <prefix>_0.fastq.gz,
+# <prefix>_1.fastq.gz, ...): reads1 may name any one of them; every part of
+# the same folder / prefix / extension is merged, in numeric order, into the
+# sample's staged FASTQ (rule stage_reads_ont). merge_split_fastq: false
+# turns this off. The original files are never modified or deleted.
+# ----------------------------------------------------------------------
+_PART_RE = re.compile(r"^(?P<prefix>.*_)(?P<num>\d+)(?P<ext>\.f(?:ast)?q(?:\.gz)?)$")
+
+
+def _fastq_parts(path):
+    """[path] or every numbered part of the split FASTQ path belongs to (sorted by number)."""
+    m = _PART_RE.match(os.path.basename(path))
+    if not m:
+        return [path]
+    folder = os.path.dirname(path) or "."
+    parts = []
+    for f in os.listdir(folder):
+        n = _PART_RE.match(f)
+        if n and n["prefix"] == m["prefix"] and n["ext"] == m["ext"]:
+            parts.append((int(n["num"]), os.path.join(folder, f)))
+    return [p for _, p in sorted(parts)] if len(parts) > 1 else [path]
+
+
+ONT_PARTS = {s: (_fastq_parts(samples.at[s, "reads1"]) if config.get("merge_split_fastq", True)
+                 else [samples.at[s, "reads1"]])
+             for s in ONT_SAMPLES}
+
+# a part listed as another sample's reads would merge two samples: stop
+_listed = {os.path.realpath(p): s for s in SAMPLE_NAMES
+           for p in (samples.at[s, "reads1"], samples.at[s, "reads2"]) if p}
+_clash = sorted({f"{s} <-> {_listed[os.path.realpath(p)]}" for s, ps in ONT_PARTS.items() if len(ps) > 1
+                 for p in ps if _listed.get(os.path.realpath(p), s) != s})
+if _clash:
+    raise WorkflowError(
+        "these samples share split FASTQ parts (same folder and file prefix), so they would be "
+        f"merged together: {', '.join(_clash)}. Rename the files, put them in separate folders, or "
+        "set merge_split_fastq: false.")
+for _s, _ps in ONT_PARTS.items():
+    if len(_ps) > 1:
+        print(f"{_s}: {len(_ps)} split FASTQ parts will be merged "
+              f"({os.path.basename(_ps[0])} ... {os.path.basename(_ps[-1])})", file=sys.stderr)
+
+
+# ----------------------------------------------------------------------
 # Wildcard constraints (some samples names have ".*")
 # ----------------------------------------------------------------------
 def _alternation(names):

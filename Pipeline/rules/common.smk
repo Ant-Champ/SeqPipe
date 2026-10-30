@@ -113,20 +113,40 @@ def sample_ref_gb(wildcards):
 # Stage per-sample inputs
 # ----------------------------------------------------------------------
 rule stage_reads_ont:
+    """One FASTQ per sample: the sheet's file (symlink, or copy with
+    stage_mode: copy), or every part of a split FASTQ merged in numeric order
+    (see ONT_PARTS in the Snakefile). Plain .fastq input is gzipped."""
     input:
-        lambda wc: raw_reads(wc.sample),
+        lambda wc: ONT_PARTS[wc.sample],
     output:
         OUT_DIR + "{sample}/{sample}.fastq.gz",
     wildcard_constraints:
         sample = ONT_RE,
+    log:
+        OUT_DIR + "{sample}/logs/stage_reads.log",
     params:
-        mode = config.get("stage_mode", "symlink"),
+        mode   = config.get("stage_mode", "symlink"),
+        nparts = lambda wc: len(ONT_PARTS[wc.sample]),
+        gz     = lambda wc: "yes" if ONT_PARTS[wc.sample][0].endswith(".gz") else "no",
     shell:
         r"""
-        if [ "{params.mode}" = "copy" ]; then
+        set -euo pipefail
+        if [ {params.nparts} -gt 1 ]; then
+            # gzip members can simply be concatenated; plain parts are compressed
+            if [ "{params.gz}" = yes ]; then cat -- {input:q} > "{output}"
+            else cat -- {input:q} | gzip > "{output}"; fi
+            echo "merged {params.nparts} parts:" > "{log}"
+            printf '%s
+' {input:q} >> "{log}"
+        elif [ "{params.gz}" = no ]; then
+            gzip -c -- "{input}" > "{output}"
+            echo "gzipped {input}" > "{log}"
+        elif [ "{params.mode}" = "copy" ]; then
             cp -- "{input}" "{output}"
+            echo "copied {input}" > "{log}"
         else
             ln -sf -- "$(readlink -f "{input}")" "{output}"
+            echo "linked {input}" > "{log}"
         fi
         """
 
