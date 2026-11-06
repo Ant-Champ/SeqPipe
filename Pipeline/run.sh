@@ -105,7 +105,11 @@ if [ "$mode" != setup ] && [ "$dry" = no ]; then
     fi
     missing=$(printf '%s\n' "$envlist" \
               | awk -F'\t' 'NF >= 3 && $1 != "environment" && $3 ~ /\// { print $1 "\t" $3 }' \
-              | while IFS=$'\t' read -r env loc; do [ -d "$loc" ] || echo "  $(basename "$env")"; done || true)
+              | while IFS=$'\t' read -r env loc; do
+                    # snakemake prints the location relative to --directory ($run_dir), not to our cwd
+                    case "$loc" in /*) ;; *) loc="$run_dir/$loc" ;; esac
+                    [ -d "$loc" ] || echo "  $(basename "$env")"
+                done || true)
     if [ -n "$missing" ]; then
         cat >&2 <<EOF
 ERROR: these conda environments are not built yet:
