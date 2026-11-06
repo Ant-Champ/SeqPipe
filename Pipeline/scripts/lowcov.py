@@ -190,7 +190,9 @@ def run(args):
     # never above low_max_thr_frac * median
     thr = max(args.low_depth, args.low_frac * median)
     cap = args.low_max_thr_frac * median
-    if thr > cap:
+    # median 0 (most of the reference uncovered): no cap, or nothing could ever be "low";
+    # region_max is then 0, so only stretches with no reads at all are reported
+    if median > 0 and thr > cap:
         print(f"WARNING: low-coverage threshold {thr:.1f} is above {args.low_max_thr_frac} x median "
               f"({median}): capped at {cap:.1f}")
         thr = cap

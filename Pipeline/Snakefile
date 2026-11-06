@@ -40,6 +40,12 @@ PIPELINE_DIR = workflow.basedir
 # ----------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------
+# `--config run_x=false` on the command line gives the string "false", which
+# Python reads as true: turn true/false strings back into booleans.
+for _k, _v in list(config.items()):
+    if isinstance(_v, str) and _v.strip().lower() in ("true", "false"):
+        config[_k] = _v.strip().lower() == "true"
+
 OUT_DIR = os.path.join(config["out_dir"], "")        # trailing slash guaranteed
 REF_DIR = os.path.join(config["ref_dir"], "")
 
@@ -196,6 +202,8 @@ for _i, _row in samples.iterrows():
     _s = _row["sample_name"] or f"(row {_i + 2})"
     if not _row["sample_name"]:
         _errors.append(f"row {_i + 2}: empty sample_name")
+    elif re.search(r"[\s/\\]", _row["sample_name"]):
+        _errors.append(f"{_s}: sample_name contains a space or a slash (it becomes file and folder names)")
     if _row["platform"] not in ("ont", "element", "illumina"):
         _errors.append(f"{_s}: platform '{_row['platform']}' (use ont | element | illumina)")
     _reads = [("reads1", _row["reads1"])]

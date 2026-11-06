@@ -166,7 +166,9 @@ rule stage_reads_sr:
         r"""
         for pair in "{input.r1}|{output.r1}" "{input.r2}|{output.r2}"; do
             src="${{pair%%|*}}"; dst="${{pair##*|}}"
-            if [ "{params.mode}" = "copy" ]; then
+            if [ "${{src%.gz}}" = "$src" ]; then
+                gzip -c -- "$src" > "$dst"     # plain .fastq: the output name says .gz
+            elif [ "{params.mode}" = "copy" ]; then
                 cp -- "$src" "$dst"
             else
                 ln -sf -- "$(readlink -f "$src")" "$dst"

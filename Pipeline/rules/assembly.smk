@@ -86,9 +86,9 @@ rule assemble_ont:
         sample = ONT_RE,
     log:
         OUT_DIR + "{sample}/logs/assemble.log",
-    threads: config.get("flye_threads", 4)
+    threads: config.get("flye_threads", 8)
     resources:
-        mem_mb = config.get("flye_mem_mb", 8000),
+        mem_mb = config.get("flye_mem_mb", 16000),
     params:
         read_mode = config.get("flye_read_mode", "--nano-raw"),
         min_bases = flye_min_bases,
@@ -114,7 +114,7 @@ rule assemble_ont:
                   --threads {threads} >> "{log}" 2>&1; then
             # e.g. a short amplicon reference: "No disjointigs were assembled".
             # An assembly is optional: mark it FAILED, keep the run going.
-            reason=$(grep -m1 "ERROR" "{log}" | sed 's/^.*ERROR:* *//' | cut -c1-200)
+            reason=$(grep -m1 "ERROR" "{log}" | sed 's/^.*ERROR:* *//' | cut -c1-200 || true)
             echo "FAILED: flye exited with an error (see above)" >> "{log}"
             printf '#seq_name\tlength\tcov.\tcirc.\trepeat\tmult.\talt_group\tgraph_path\n' > "{output.info}"
             printf '# FAILED: flye error: %s (see logs/assemble.log)\n' "${{reason:-unknown}}" >> "{output.info}"
@@ -169,7 +169,7 @@ rule assemble_sr:
                        -o "{output.asm_dir}" \
                        -t {threads} \
                        --mode {params.mode} >> "{log}" 2>&1; then
-            reason=$(grep -m1 -i "error" "{log}" | cut -c1-200)
+            reason=$(grep -m1 -i "error" "{log}" | cut -c1-200 || true)
             echo "FAILED: unicycler exited with an error (see above)" >> "{log}"
             printf '#seq_name\tlength\tcov.\tcirc.\n' > "{output.info}"
             printf '# FAILED: unicycler error: %s (see logs/assemble.log)\n' "${{reason:-unknown}}" >> "{output.info}"

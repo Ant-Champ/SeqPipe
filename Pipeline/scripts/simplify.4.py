@@ -2,7 +2,7 @@ import pandas as pd
 import argparse
 
 def mutation_type(row):
-    if len(row['REF']) != len(row['ALT']):
+    if any(len(alt) != len(row['REF']) for alt in row['ALT'].split(',')):
         return 'INDEL'
     else:
         return 'SNP'
@@ -21,7 +21,8 @@ def calculate_reads_percentage(row):
 
 def parse_vcf(vcf_file, min_allele):
     try:
-        df = pd.read_csv(vcf_file, sep='\t', comment='#', header=None)
+        # CHROM as text: a contig named 01 or NA must keep its name
+        df = pd.read_csv(vcf_file, sep='\t', comment='#', header=None, dtype={0: str}, keep_default_na=False)
     except pd.errors.EmptyDataError:
         columns = ['CHROM', 'POS', 'REF', 'ALT', '%Reads', 'MutationType']
         return pd.DataFrame(columns=columns)
@@ -29,7 +30,13 @@ def parse_vcf(vcf_file, min_allele):
     df.columns = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT', 'SAMPLE']
     #df['DP4'] = df['INFO'].apply(lambda x: dict(item.split("=") for item in x.split(";") if '=' in item).get('DP4', '0,0,0,0'))
     df['SR'] = df['INFO'].apply(lambda x: dict(item.split("=") for item in x.split(";") if '=' in item).get('SR', '0,0,0,0'))
-    df[['REF_F', 'REF_R', 'ALT_F', 'ALT_R']] = df['SR'].str.split(',', expand=True).astype(int)
+    # SR = ref fwd, ref rev, then fwd, rev for each ALT allele (a multi-allelic
+    # record has more than 4 values): the ALT counts are summed over the alleles
+    sr = df['SR'].apply(lambda v: [int(x) for x in v.split(',')])
+    df['REF_F'] = sr.str[0]
+    df['REF_R'] = sr.str[1]
+    df['ALT_F'] = sr.apply(lambda v: sum(v[2::2]))
+    df['ALT_R'] = sr.apply(lambda v: sum(v[3::2]))
 
     df['MutationType'] = df.apply(mutation_type, axis=1)
     df['%Reads'] = df.apply(calculate_reads_percentage, axis=1)

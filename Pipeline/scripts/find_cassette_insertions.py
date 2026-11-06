@@ -233,7 +233,7 @@ def _clip_events(r, args, cass_seqs, cass_unique):
                 orient, cpos = "-", i + k / 2
         if not hits:
             continue
-        clen = len(cass_seqs[next(iter(hits))])
+        clen = len(cass_seqs[min(hits)])             # min(): the same cassette on every run
         name = next(iter(hits)) if len(hits) == 1 else None
         if name is None and r.is_paired and cass_unique.get(r.query_name) in hits:
             name = cass_unique[r.query_name]           # identity from the uniquely mapped mate
@@ -319,14 +319,15 @@ def _hotspots(evidence, args, cass_list):
             kinds = {k: len({e[4] for e in g if e[3] == k})
                      for k in ("mate", "genome_clip", "cassette_clip", "split")}
             named = Counter()
-            for read in reads:                       # one vote per read
+            for read in sorted(reads):               # one vote per read (sorted: same order every run)
                 names = {e[5] for e in g if e[4] == read and e[5]}
                 if len(names) == 1:
                     named[names.pop()] += 1
-            if named and named.most_common(1)[0][1] >= 0.8 * sum(named.values()):
-                call = named.most_common(1)[0][0]
-            elif len(named) >= 2:
-                call = "mixed(%s)" % ",".join(f"{k}:{v}" for k, v in named.most_common())
+            ranked = sorted(named.items(), key=lambda kv: (-kv[1], kv[0]))   # ties by name
+            if ranked and ranked[0][1] >= 0.8 * sum(named.values()):
+                call = ranked[0][0]
+            elif len(ranked) >= 2:
+                call = "mixed(%s)" % ",".join(f"{k}:{v}" for k, v in ranked)
             else:
                 call = "ambiguous"
             jpos = Counter(e[1] for e in g if e[3] != "mate")

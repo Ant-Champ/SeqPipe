@@ -135,8 +135,9 @@ def read_genes(gb_path, types=("CDS", "rRNA", "tRNA", "ncRNA")):
             q = f.qualifiers
             name = (q.get("gene") or q.get("locus_tag") or q.get("label") or [f.type])[0]
             prod = (q.get("product") or q.get("note") or [""])[0]
-            feats.append([int(f.location.start) + 1, int(f.location.end),
-                          1 if (f.location.strand or 1) > 0 else -1, name, prod[:80]])
+            for part in f.location.parts:   # join() / across the origin: each part on its own
+                feats.append([int(part.start) + 1, int(part.end),
+                              1 if (part.strand or f.location.strand or 1) > 0 else -1, name, prod[:80]])
         genes[rec.id] = feats
     return genes
 
@@ -342,7 +343,8 @@ def main(samples, out_dir, toggles, embed_pictures, config, out_html, cassettes=
                 log("WARNING: genes of %s: %s" % (ref, err))
                 data["genes"][ref] = {}
 
-    payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    # every "<" escaped: no text from the data (GenBank products, notes...) can end the <script>
+    payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
     # named after the run folder (the config's folder: snakemake runs there)
     page = PAGE.replace("__TITLE__", html.escape("Run report - " + os.path.basename(os.getcwd()))) \
                .replace("__DATA__", payload)
@@ -700,6 +702,7 @@ function plot(sample, contig, cassette = false) {
   }
   function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); for (const m of [1, 2, 5, 10]) if (m * p >= raw) return m * p; return 10 * p; }
   const tip = document.getElementById("tip");
+  const esc = v => String(v).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
   let downY = 0;
   cv.addEventListener("mousedown", e => { drag = [e.offsetX, e.offsetX]; downY = e.offsetY; });
   cv.addEventListener("mousemove", e => {
@@ -707,9 +710,9 @@ function plot(sample, contig, cassette = false) {
     const p = Math.floor(P(e.offsetX)), i = Math.min(dp.v.length - 1, Math.floor((p - 1) / dp.bin));  // base p spans X(p)..X(p+1)
     const here = ev.filter(x => x[2] - (st.b - st.a) / W * 3 <= p && x[3] + (st.b - st.a) / W * 3 >= p);
     const gs = genes.filter(x => x[0] <= p && x[1] >= p);
-    tip.innerHTML = `<b>${contig}:${p.toLocaleString()}</b><br>depth ≈ ${dp.v[i]}×` +
-      gs.map(x => `<br>gene <b>${x[3]}</b> ${x[4] ? "– " + x[4] : ""}`).join("") +
-      here.map(x => `<br><span style="color:${css(EVCOL[x[0]])}">■</span> ${x[0]} ${x[2]}-${x[3]} ${x[4]}`).join("") +
+    tip.innerHTML = `<b>${esc(contig)}:${p.toLocaleString()}</b><br>depth ≈ ${dp.v[i]}×` +   // GenBank text is escaped
+      gs.map(x => `<br>gene <b>${esc(x[3])}</b> ${x[4] ? "– " + esc(x[4]) : ""}`).join("") +
+      here.map(x => `<br><span style="color:${css(EVCOL[x[0]])}">■</span> ${esc(x[0])} ${x[2]}-${x[3]} ${esc(x[4])}`).join("") +
       (readsHere() ? readCounts(p) : "") +
       (here.some(x => ["variant", "indel", "breakpoint"].includes(x[0])) ? '<br><i>click: zoom to it ± 200 bp</i>' : "");
     tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - 370) + "px"; tip.style.top = (e.clientY + 14) + "px";

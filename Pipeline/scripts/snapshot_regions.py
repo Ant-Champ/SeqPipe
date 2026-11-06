@@ -77,7 +77,8 @@ def features(genbank):
                 continue
             q = f.qualifiers
             name = (q.get("gene") or q.get("locus_tag") or q.get("label") or [f.type])[0]
-            fs.append((int(f.location.start), int(f.location.end), f.location.strand or 1, name))
+            for part in f.location.parts:       # join() / across the origin: each part on its own
+                fs.append((int(part.start), int(part.end), part.strand or f.location.strand or 1, name))
         out[rec.id] = fs
     return out
 

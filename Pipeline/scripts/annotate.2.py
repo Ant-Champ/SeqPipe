@@ -21,11 +21,14 @@ def mutation_in_annotation(mutations_file, gb_file, output_file):
         for feature in record.features:
             if feature.type != "source":  # Exclude the source feature
                 description = get_annotation_description(feature)
-                feats.append({
-                    'start': int(feature.location.start),  # 0-based
-                    'end': int(feature.location.end),      # exclusive
-                    'description': description
-                })
+                # one interval per part: a join() or a feature across the origin
+                # is not one block from its lowest to its highest base
+                for part in feature.location.parts:
+                    feats.append({
+                        'start': int(part.start),  # 0-based
+                        'end': int(part.end),      # exclusive
+                        'description': description
+                    })
     single = next(iter(annotations.values())) if len(annotations) == 1 else None
 
     # Process mutations TSV
@@ -43,7 +46,8 @@ def mutation_in_annotation(mutations_file, gb_file, output_file):
             if feats is None:
                 feats = []
             # Find annotations that encompass the mutation (1-based POS vs 0-based start)
-            overlapping_annotations = [annotation['description'] for annotation in feats if annotation['start'] < pos <= annotation['end']]
+            overlapping_annotations = list(dict.fromkeys(
+                annotation['description'] for annotation in feats if annotation['start'] < pos <= annotation['end']))
 
             # Join overlapping annotations into a single string
             row['Annotation Descriptions'] = '; '.join(overlapping_annotations) if overlapping_annotations else 'None'

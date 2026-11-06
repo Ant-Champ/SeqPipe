@@ -29,9 +29,9 @@ import pandas as pd
 def parse_args():
     p = argparse.ArgumentParser(
         description="Aggregate per-sample `samtools coverage` tables into one run-level table.")
-    p.add_argument("-in", dest="infiles", nargs="+", required=True,
+    p.add_argument("-in", dest="infiles", nargs="*", default=[],
                    help="Per-sample coverage TSVs from `samtools coverage`")
-    p.add_argument("-samples", nargs="+", required=True,
+    p.add_argument("-samples", nargs="*", default=[],
                    help="Sample name for each -in file, same order/count")
     p.add_argument("-out", required=True, help="Output aggregated TSV")
     p.add_argument("-name_col", default="replicon",
@@ -50,6 +50,15 @@ def main():
     if len(args.infiles) != len(args.samples):
         sys.exit("ERROR: -in and -samples must have the same number of entries "
                   f"({len(args.infiles)} vs {len(args.samples)})")
+
+    if not args.infiles:
+        # every sample was skipped (e.g. all low_diversity): an empty table, not an error
+        cols = ["sample"] + (["source"] if args.source else []) + [
+            args.name_col, "startpos", "endpos", "numreads", "covbases",
+            "coverage", "meandepth", "meanbaseq", "meanmapq"]
+        pd.DataFrame(columns=cols).to_csv(args.out, sep="\t", index=False)
+        sys.stderr.write(f"no samples to aggregate: wrote an empty {args.out}\n")
+        return
 
     frames = []
     for path, sample in zip(args.infiles, args.samples):

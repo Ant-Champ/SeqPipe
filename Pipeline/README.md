@@ -230,7 +230,8 @@ every row and **stops with the full list of problems**. It stops on:
 - a duplicated `sample_name`.
 
 Use full paths (`/home/...`, `/net/...`). A relative path is read from the run folder (the
-folder that contains `config.yaml`).
+folder that contains `config.yaml`). Paths must not contain spaces: several tools are called
+with unquoted paths. The same applies to `out_dir` and to the folder the pipeline is installed in.
 
 To fill the ONT column quickly, list the files with full paths:
 ```bash
@@ -358,7 +359,9 @@ conda activate seqpipe
   Each step's own threads/memory are in the config (`align_threads`, `medaka_mem_mb`, …).
 - **How big an allocation?**
   - 16 CPUs / 64 G is comfortable for about 10–20 bacterial samples.
-  - Plasmid-only runs need much less (`--cpus-per-task=8 --mem=16G`).
+  - Plasmid-only runs need much less (`--cpus-per-task=8 --mem=20G`). Keep `--mem` above the
+    largest `*_mem_mb` of the config (16000 by default) plus 10 %: `run.sh` gives snakemake
+    90 % of the allocation, and a job that asks for more than that stops the run.
   - Allow time: a few hours for many ONT samples with medaka and assembly.
 - `run.sh` refuses to start a real run outside an allocation. Never run analyses on a login node.
 - **No cluster?** On a Linux workstation, skip `tmux`/`salloc` and run

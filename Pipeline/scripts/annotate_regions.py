@@ -31,7 +31,10 @@ def load_features(gb, skip):
             nm = (q.get("gene") or q.get("locus_tag") or q.get("label") or ["?"])[0]
             prod = (q.get("product") or q.get("note") or [""])[0]
             label = f"{f.type}:{nm}" + (f"({prod})" if prod else "")
-            feats[rec.id].append((int(f.location.start), int(f.location.end), label))
+            # ';' separates features in the output column, tabs / newlines would break the TSV
+            label = " ".join(label.replace(";", ",").split())
+            for part in f.location.parts:       # join() / across the origin: each part on its own
+                feats[rec.id].append((int(part.start), int(part.end), label))
     return feats
 
 
@@ -49,7 +52,7 @@ def annotate_table(gb, tsv_in, tsv_out, skip_types="source,gene"):
                 continue
             c = line.split("\t")
             contig, s, e = c[0], int(c[1]), int(c[2])
-            hits = [lab for fs, fe, lab in feats.get(contig, []) if fs < e and fe > s]
+            hits = list(dict.fromkeys(lab for fs, fe, lab in feats.get(contig, []) if fs < e and fe > s))
             fout.write(line + "\t" + (";".join(hits) if hits else ".") + "\n")
 
 
