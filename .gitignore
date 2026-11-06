@@ -4,5 +4,3 @@ results/
 logs/
 __pycache__/
 *.pyc
-# large reference data (keep out of version control)
-Element_Analysis/reference.gb

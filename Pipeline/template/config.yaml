@@ -158,7 +158,7 @@ plasmid_screen_mem_mb : 4000
 # (without extension) is the cassette name in every output. ALL cassettes in the
 # folder are searched in every sample, together, so that the regions cassettes
 # share (e.g. Keio FRT / priming-site ends) are recognised as ambiguous.
-cassette_dir       : "/home/antoine9/Pipeline/references/cassettes/"
+cassette_dir       : ""         # required when run_cassette_search is true
 cassette_min_mapq  : 20      # read evidence below this mapping quality cannot name the cassette
 cassette_min_reads : 2       # minimum junction reads for a junction
 cassette_max_span  : 20000   # max distance between the two junctions of one insertion site (bp)

@@ -8,13 +8,14 @@
 # Useful snakemake options: -n (dry run: list jobs, run nothing; OK on a login node),
 #   --forcerun lowcov (redo that step), --until align_sr (stop after it), --unlock.
 # Uses every CPU and all memory of the current salloc allocation.
+# Without SLURM (a workstation): SEQPIPE_NO_SLURM=1 ./run.sh CONFIG  (uses every CPU, 90 % of free memory)
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_NAME="${SEQPIPE_ENV:-seqpipe}"                                  # driver env (envs/snakemake.yaml)
 CONDA_ENVS_DIR="${SEQPIPE_CONDA_PREFIX:-$PIPELINE_DIR/.conda_envs}" # per-rule envs, shared by all runs
 
-usage() { sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1; }
 [ $# -ge 1 ] || usage
 
 # --- driver environment (snakemake) ----------------------------------------
@@ -53,13 +54,15 @@ for a in "$@"; do
 done
 
 # --- resources: the salloc allocation ------------------------------------------
-if [ "$mode" != setup ] && [ "$dry" = no ] && [ -z "${SLURM_JOB_ID:-}" ]; then
+# On a workstation (no SLURM), set SEQPIPE_NO_SLURM=1 to use this machine's CPUs and memory.
+if [ "$mode" != setup ] && [ "$dry" = no ] && [ -z "${SLURM_JOB_ID:-}" ] && [ "${SEQPIPE_NO_SLURM:-0}" != 1 ]; then
     cat >&2 <<'EOF'
 ERROR: not inside a SLURM allocation (never run analyses on a login node).
 Start one first, from inside tmux so it survives a dropped connection, e.g.:
     tmux new -s pipeline
-    salloc --account=def-rodrigu1 --time=4:00:00 --cpus-per-task=16 --mem=64G
+    salloc --account=<your-account> --time=4:00:00 --cpus-per-task=16 --mem=64G
 then re-run this command. (Add -n for a dry run, which is fine on a login node.)
+Not on a cluster? Run it as:  SEQPIPE_NO_SLURM=1 ./run.sh CONFIG
 EOF
     exit 1
 fi

@@ -1,18 +1,18 @@
-# Sequencing analysis pipeline: ONT + Element / Illumina
+# SeqPipe: sequencing analysis pipeline for ONT + Element / Illumina reads
 
 One Snakemake pipeline for **Oxford Nanopore (ONT) long reads** and **paired-end short reads
 (Element AVITI or Illumina)**, mapped against **GenBank references** (plasmids, phages,
 bacterial genomes). ONT and short-read samples can be mixed in one run. Each analysis can be
 switched on or off in `config.yaml`.
 
-It merges the former `ONT Analysis` (NanoForge) pipeline and the `Element_Analysis` (alignqc)
-pipeline. It is meant to run **interactively inside a `salloc` allocation**, not with `sbatch`.
+It is meant to run **interactively inside a SLURM `salloc` allocation**, not with `sbatch`. It also
+runs on a single Linux workstation (see [4.2](#42-the-real-run-inside-salloc)).
 
 ---
 
 ## Quick reminder (when you come back after a few months)
 
-Run these on the cluster. Replace `def-rodrigu1` if your account differs.
+Run these on the cluster. Replace `<your-account>` with your SLURM account.
 
 ```bash
 # 1. login node: go to the pipeline and activate the driver environment
@@ -30,7 +30,7 @@ nano config.yaml                    # paths + which analyses to run
 
 # 4. get a compute allocation inside tmux, then run
 tmux new -s pipeline
-salloc --account=def-rodrigu1 --time=6:00:00 --cpus-per-task=16 --mem=64G
+salloc --account=<your-account> --time=6:00:00 --cpus-per-task=16 --mem=64G
 ~/Pipeline/run.sh ~/runs/MY_RUN/config.yaml
 
 # 5. results: copy <out_dir>/report.html to your PC and open it in a browser
@@ -106,23 +106,19 @@ junctions are the replaced gene.
 The only requirement is **conda** working on the cluster. Snakemake builds every tool
 (minimap2, medaka, bwa-mem2, …) in its own conda environment the first time.
 
-### 2.1 Copy the pipeline to the cluster
+### 2.1 Get the pipeline
 
-From your own computer, in the folder that contains `Pipeline/` (PowerShell, Git Bash or a Linux
-terminal):
-
-```bash
-scp -r Pipeline <username>@<cluster-login-address>:~/
-```
-
-The pipeline is then in `~/Pipeline` on the cluster. All the commands below assume that location.
-If you put it somewhere else, adapt the paths.
-
-Then, on the cluster:
+On the cluster (or your Linux machine):
 
 ```bash
-chmod +x ~/Pipeline/run.sh
+git clone https://github.com/Ant-Champ/SeqPipe.git ~/SeqPipe
+ln -s ~/SeqPipe/Pipeline ~/Pipeline
 ```
+
+The pipeline is then in `~/Pipeline`. All the commands below assume that location. If you put it
+somewhere else, adapt the paths. Without internet on the cluster, copy the `Pipeline/` folder there
+instead (`scp -r Pipeline <username>@<cluster-login-address>:~/`) and run
+`chmod +x ~/Pipeline/run.sh`.
 
 ### 2.2 Check conda and set the channels
 
@@ -158,14 +154,14 @@ them. It takes 15–40 min, and medaka is the largest. When it finishes it print
 
 > Re-run `~/Pipeline/run.sh setup` after every `git pull` that adds or changes a file in
 > `envs/`. Compute nodes have no internet: a run that reached a step whose environment is
-> missing would wait forever. `run.sh` now checks this before starting and stops with the list
+> missing would wait forever, so `run.sh` checks this before starting and stops with the list
 > of missing environments.
 
 ### 2.5 Test the installation on the bundled data (≈ 5 min)
 
 ```bash
 tmux new -s pipeline
-salloc --account=def-rodrigu1 --time=1:00:00 --cpus-per-task=4 --mem=16G
+salloc --account=<your-account> --time=1:00:00 --cpus-per-task=4 --mem=16G
 conda activate seqpipe
 ~/Pipeline/run.sh test
 column -t -s $'\t' ~/Pipeline/test/results/summary.tsv
@@ -289,7 +285,7 @@ run_denovo_assembly   : false
 run_plasmid_screen    : false
 run_cassette_search   : false    # true: locate every cassette of cassette_dir, in every sample
 run_hotspot_pictures  : false
-cassette_dir          : "/home/antoine9/Pipeline/references/cassettes/"
+cassette_dir          : "/home/<you>/references/cassettes/"
 ```
 
 Every other parameter is explained in the file itself and in
@@ -302,7 +298,7 @@ To find where antibiotic cassettes are inserted:
 1. Put **one file per cassette** in a folder: GenBank (`.gb`, `.gbk`) or FASTA (`.fasta`, `.fa`).
    The file name, without its extension, becomes the cassette name in every table:
    ```
-   /home/antoine9/Pipeline/references/cassettes/
+   /home/<you>/references/cassettes/
        KEIO_Kan_Cassette.gb
        KEIO_Chlor_sfGFP_Cassette.gb
    ```
@@ -353,7 +349,7 @@ Always start `tmux` **before** `salloc`, so the run survives a dropped connectio
 
 ```bash
 tmux new -s pipeline
-salloc --account=def-rodrigu1 --time=6:00:00 --cpus-per-task=16 --mem=64G
+salloc --account=<your-account> --time=6:00:00 --cpus-per-task=16 --mem=64G
 conda activate seqpipe
 ~/Pipeline/run.sh ~/runs/WGS_KEIO_2026_11/config.yaml
 ```
@@ -365,13 +361,15 @@ conda activate seqpipe
   - Plasmid-only runs need much less (`--cpus-per-task=8 --mem=16G`).
   - Allow time: a few hours for many ONT samples with medaka and assembly.
 - `run.sh` refuses to start a real run outside an allocation. Never run analyses on a login node.
+- **No cluster?** On a Linux workstation, skip `tmux`/`salloc` and run
+  `SEQPIPE_NO_SLURM=1 ~/Pipeline/run.sh <config>`: it uses every CPU and 90 % of the free memory.
 - tmux reminders:
   - `Ctrl-b d` detaches (the run continues);
   - `tmux attach -t pipeline` comes back;
   - `tmux ls` lists sessions.
   - tmux sessions live on one login node, so note which one (`hostname`).
 
-When it finishes it prints `Done. Start with: <out_dir>/summary.tsv`.
+When it finishes it prints `Done. Start with: <out_dir>/report.html … or <out_dir>/summary.tsv`.
 
 ### 4.3 Re-running, partial runs
 
@@ -458,10 +456,10 @@ with its reference `.gb`). `share_dir` puts it elsewhere; `run_share_bundle: fal
 ### 5.1 The HTML report
 
 `report.html` is one file: copy it to your PC and open it in any browser. It needs no internet
-connection. To copy it, use WinSCP, or from WSL:
+connection. To copy it, use WinSCP, or from a terminal (Linux, macOS, WSL):
 
 ```bash
-scp narval:~/runs/MY_RUN/results/report.html /mnt/c/Users/Ant/Downloads/
+scp <username>@<cluster-login-address>:~/runs/MY_RUN/results/report.html .
 ```
 
 The two buttons at the top switch between two views:
@@ -673,8 +671,8 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 |---|---|
 | `conda: command not found` | load / initialise conda on that cluster (as when you installed) |
 | `conda environment 'seqpipe' not found` | do [2.3](#23-create-the-driver-environment-snakemake) |
-| `ERROR: these conda environments are not built yet`, or a run stuck with nothing happening / on "Creating conda environment" | the environments were not built: run `~/Pipeline/run.sh setup` on a login node ([2.4](#24-build-the-tool-environments-login-node-needs-internet)). (Before this fix, `setup` built only the environments of the first steps, those before the depth check) |
-| `ERROR: not inside a SLURM allocation` | start `salloc` first (inside tmux), or add `-n` for a dry run |
+| `ERROR: these conda environments are not built yet`, or a run stuck with nothing happening / on "Creating conda environment" | the environments were not built: run `~/Pipeline/run.sh setup` on a login node ([2.4](#24-build-the-tool-environments-login-node-needs-internet)) |
+| `ERROR: not inside a SLURM allocation` | start `salloc` first (inside tmux), or add `-n` for a dry run. On a workstation without SLURM: `SEQPIPE_NO_SLURM=1` ([4.2](#42-the-real-run-inside-salloc)) |
 | `sample_sheet is missing required column(s)` | the sheet is not tab-separated, or the header is misspelled |
 | `N problem(s) in sample_sheet …` | the list below it says which sample and column. Fix them all, then re-run |
 | `config key(s) fastq_dir, … are no longer used` | an old config: delete those lines and put full FASTQ paths and the reference in the sheet |
@@ -704,7 +702,7 @@ Everything is in `config.yaml`, which has a comment on each line. The main param
 Pipeline/
   Snakefile          entry point: config, sample sheet, toggles, rule all
   rules/*.smk        one file per analysis (common, qc, align, variants, coverage, sv,
-                     multimer, assembly, plasmid_screen, summary)
+                     multimer, assembly, plasmid_screen, cassettes, summary, report, share)
   envs/*.yaml        conda environment per step (+ snakemake.yaml = driver env)
   scripts/*.py       analysis scripts
   template/          config.yaml + sample_sheet.tsv to copy for a new run

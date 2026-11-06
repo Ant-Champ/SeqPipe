@@ -117,7 +117,7 @@ def main():
         fh.write(f">absent_plasmid\n{absent}\n")
 
     # ONT reads: lengths 1-6 kb, ~40x per copy, 1 % errors, both strands
-    with gzip.open(HERE / "fastq" / "barcode01.fastq.gz", "wt") as fh:
+    with gzip.open(HERE / "fastq" / "barcode01.fastq.gz", "wt", newline="\n") as fh:
         n = 0
         for seq, copies in replicons:
             target = 40 * len(seq) * copies
@@ -132,8 +132,8 @@ def main():
                 fh.write(f"@ont_{n}\n{read}\n+\n{'5' * len(read)}\n")
 
     # Short reads: PE75, insert 250-400 bp, ~60x, 0.1 % substitutions
-    with gzip.open(HERE / "fastq" / "sr_R1.fastq.gz", "wt") as f1, \
-         gzip.open(HERE / "fastq" / "sr_R2.fastq.gz", "wt") as f2:
+    with gzip.open(HERE / "fastq" / "sr_R1.fastq.gz", "wt", newline="\n") as f1, \
+         gzip.open(HERE / "fastq" / "sr_R2.fastq.gz", "wt", newline="\n") as f2:
         n = 0
         for seq, copies in replicons:
             pairs = int(60 * len(seq) * copies / 150)

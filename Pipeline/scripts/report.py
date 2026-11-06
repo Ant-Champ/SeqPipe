@@ -17,7 +17,6 @@ Nothing is loaded from the internet: the file opens offline.
 """
 
 import base64
-import csv
 import datetime
 import glob
 import html
