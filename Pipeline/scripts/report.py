@@ -163,10 +163,12 @@ def events_from(t, kind, label_cols):
     if ci is None or si is None:
         return []
     li = [col(t, c) for c in label_cols]
+    # "start" columns are 0-based half-open (BED-like); POS and the plot are 1-based
+    shift = 1 if t["columns"][si] == "start" else 0
     ev = []
     for r in t["rows"]:
         try:
-            s = int(r[si])
+            s = int(r[si]) + shift
             e = int(r[ei]) if ei is not None else s
         except (ValueError, IndexError):
             continue
@@ -481,7 +483,8 @@ function table(t, opts = {}) {
         tr.append(td);
       });
       if (linkable) tr.addEventListener("click", () => {
-        const s = opts.sample || row[opts.sampleCol], a = num(row[si]), b = ei !== undefined ? num(row[ei]) : a;
+        // "start" is 0-based half-open (BED-like); the plot is 1-based
+        const s = opts.sample || row[opts.sampleCol], a0 = num(row[si]), a = a0 === null ? null : a0 + (t.columns[si] === "start" ? 1 : 0), b = ei !== undefined ? num(row[ei]) : a;
         goTo(s, row[ci], a, b ?? a);
       });
       tb.append(tr);

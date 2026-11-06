@@ -3,15 +3,16 @@
 add_multimer_column.1.py -- append the sample-level multimer verdict as a
 column to a per-variant TSV.
 
-The multimer call describes the *molecule*, not any individual variant, so
-the added column carries the same value on every row of a given sample.
+The multimer call describes the *molecule*, not any individual variant: every
+variant gets the verdict of its own replicon (CHROM column; the sample-level
+call when the table has no CHROM column or the replicon is not in the summary).
 Its purpose is to make the final table self-contained: when tables from
 several samples are concatenated, each variant still knows whether it came
 from a multimeric plasmid.
 
 Inputs
   -in       per-variant TSV (e.g. <sample>.annotated.gatc.simple.tsv)
-  -summary  one-line TSV written by multimer.1.py -summary
+  -summary  TSV written by multimer.2.py -summary (one row per replicon)
 Output
   -out      same table with the extra column(s) appended
 
@@ -30,7 +31,7 @@ def parse_args():
     p.add_argument("-in", dest="infile", required=True,
                    help="Input per-variant TSV")
     p.add_argument("-summary", required=True,
-                   help="Summary TSV from multimer.1.py -summary")
+                   help="Summary TSV from multimer.2.py -summary")
     p.add_argument("-out", required=True, help="Output TSV")
     p.add_argument("-col", default="multimer",
                    help="Name of the added column [multimer]")
@@ -45,27 +46,48 @@ def parse_args():
 
 
 def read_summary(path, default):
-    """Return the single summary row as a dict, or {} on any problem."""
+    """Return the summary rows (one per replicon) as dicts, or [] on any problem."""
     try:
         with open(path, newline="") as fh:
-            rows = list(csv.DictReader(fh, delimiter="\t"))
-        return rows[0] if rows else {}
+            return list(csv.DictReader(fh, delimiter="\t"))
     except (OSError, csv.Error) as err:
         sys.stderr.write("WARNING: cannot read %s (%s); using '%s'\n"
                          % (path, err, default))
-        return {}
+        return []
+
+
+def _pct(r):
+    try:
+        return float(r.get("multimer_pct", 0))
+    except ValueError:
+        return 0.0
+
+
+def sample_row(rows):
+    """The row behind the sample-level call: a multimeric replicon if any,
+    else one that could be judged, else the one with the most reads."""
+    for call in ("yes", "no"):
+        hits = [r for r in rows if r.get("multimer") == call]
+        if hits:
+            return max(hits, key=_pct)
+    return max(rows, key=lambda r: int(r.get("reads_mapped") or 0)) if rows else {}
+
+
+def values(row, args):
+    vals = [row.get("multimer", args.default) or args.default]
+    if args.extra:
+        vals += [row.get("multimer_copies", args.default),
+                 row.get("multimer_pct", args.default)]
+    return vals
 
 
 def main():
     args = parse_args()
-    summary = read_summary(args.summary, args.default)
+    rows = read_summary(args.summary, args.default)
+    by_replicon = {r.get("reference"): r for r in rows}
+    fallback = sample_row(rows)
 
-    added = [(args.col, summary.get("multimer", args.default) or args.default)]
-    if args.extra:
-        added += [
-            ("multimer_copies", summary.get("multimer_copies", args.default)),
-            ("multimer_pct",    summary.get("multimer_pct", args.default)),
-        ]
+    names = [args.col] + (["multimer_copies", "multimer_pct"] if args.extra else [])
 
     n_rows = 0
     with open(args.infile, newline="") as fin, \
@@ -73,23 +95,29 @@ def main():
         reader = csv.reader(fin, delimiter="\t")
         writer = csv.writer(fout, delimiter="\t", lineterminator="\n")
 
-        first = True
+        first, chrom_col = True, None
         for row in reader:
             if not row:                     # preserve nothing, skip blank lines
                 continue
             if first and not args.no_header:
-                writer.writerow(row + [name for name, _ in added])
+                writer.writerow(row + names)
+                # each variant gets the verdict of its own replicon
+                chrom_col = row.index("CHROM") if "CHROM" in row else None
                 first = False
                 continue
             first = False
-            writer.writerow(row + [val for _, val in added])
+            src = fallback
+            if chrom_col is not None and chrom_col < len(row):
+                src = by_replicon.get(row[chrom_col], fallback)
+            writer.writerow(row + values(src, args))
             n_rows += 1
 
         if first:                           # completely empty input file
-            writer.writerow([name for name, _ in added])
+            writer.writerow(names)
 
-    sys.stderr.write("added %s=%s to %d row(s) -> %s\n"
-                     % (args.col, added[0][1], n_rows, args.out))
+    sys.stderr.write("added %s (per replicon: %s) to %d row(s) -> %s\n"
+                     % (args.col, ", ".join("%s=%s" % (r.get("reference"), r.get("multimer"))
+                                            for r in rows) or "none", n_rows, args.out))
 
 
 if __name__ == "__main__":

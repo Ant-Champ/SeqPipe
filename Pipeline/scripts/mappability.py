@@ -7,8 +7,9 @@ i, R2 reverse-complement ending at i + --insert; reads wrap around the origin
 of circular records, as real reads do), aligned back with bwa-mem2 exactly as
 the sample reads are, and counted per base like `samtools depth -Q`
 (--min-mapq; unmapped / secondary alignments skipped). A perfect pair gives
-2 x read_len / step reads per base; a base is "unmappable" when it gets less
-than --min-frac of that. Real reads behave the same there, so the low-coverage
+2 x read_len / step reads per base (fewer near the ends of a linear record,
+where pairs must fit in the record); a base is "unmappable" when it gets less
+than --min-frac of what the simulated pairs put on it. Real reads behave the same there, so the low-coverage
 scan (lowcov.py --mask) ignores these bases.
 
 --out-bed : contig  start  end  (0-based half-open, merged, '#' header)
@@ -29,9 +30,33 @@ _COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 
 
+def _add(d, s, e, L):
+    """+1 over [s, e) of a difference array, wrapping past L (circular)."""
+    s, e = s % L, s % L + (e - s)
+    if e <= L:
+        d[s] += 1
+        d[e] -= 1
+    else:
+        d[s] += 1
+        d[L] -= 1
+        d[0] += 1
+        d[e - L] -= 1
+
+
+def _cumulate(d, L):
+    run, out = 0, array("i", bytes(4 * L))
+    for i in range(L):
+        run += d[i]
+        out[i] = run
+    return out
+
+
 def simulate(records, read_len, insert, step, r1_path, r2_path):
+    """Write the pairs; return their number and, per record, how many simulated
+    reads cover each base (the depth expected if every read mapped uniquely)."""
     qual = "I" * read_len
     n = 0
+    expected = {}
     with gzip.open(r1_path, "wt", compresslevel=1) as f1, gzip.open(r2_path, "wt", compresslevel=1) as f2:
         for rec in records:
             seq = str(rec.seq).upper()
@@ -42,17 +67,21 @@ def simulate(records, read_len, insert, step, r1_path, r2_path):
                 last = L                       # every start position
             else:
                 last = L - insert + 1          # pairs must fit in the record
+            diff = array("i", bytes(4 * (L + 1)))
+            expected[rec.id] = diff
             if insert > L:
                 print(f"WARNING: {rec.id} ({L} bp) is shorter than the insert: skipped", file=sys.stderr)
                 continue
             for i in range(0, max(last, 0), step):
+                _add(diff, i, i + read_len, L)
+                _add(diff, i + insert - read_len, i + insert, L)
                 r1 = seq[i:i + read_len]
                 r2 = seq[i + insert - read_len:i + insert].translate(_COMP)[::-1]
                 name = f"{rec.id}_{i}"
                 f1.write(f"@{name}/1\n{r1}\n+\n{qual}\n")
                 f2.write(f"@{name}/2\n{r2}\n+\n{qual}\n")
                 n += 1
-    return n
+    return n, {c: _cumulate(d, len(d) - 1) for c, d in expected.items()}
 
 
 def count_depth(sam, lengths, min_mapq):
@@ -66,30 +95,16 @@ def count_depth(sam, lengths, min_mapq):
         if flag & 0x704 or mapq < min_mapq or contig not in diff:   # as samtools depth: unmapped, secondary, qcfail, dup
             continue
         span = sum(int(n) for n, op in _CIGAR.findall(cigar) if op in "MDN=X")
-        d, L = diff[contig], lengths[contig]
-        end = pos + span
-        if end <= L:
-            d[pos] += 1
-            d[end] -= 1
-        else:                                  # alignment over the origin of a circular record
-            d[pos] += 1
-            d[L] -= 1
-            d[0] += 1
-            d[end - L] -= 1
-    depth = {}
-    for c, d in diff.items():
-        run, out = 0, array("i", bytes(4 * lengths[c]))
-        for i in range(lengths[c]):
-            run += d[i]
-            out[i] = run
-        depth[c] = out
-    return depth
+        _add(diff[contig], pos, pos + span, lengths[contig])   # wraps over the origin of a circular record
+    return {c: _cumulate(d, lengths[c]) for c, d in diff.items()}
 
 
-def unmappable_regions(arr, thr):
+def unmappable_regions(arr, expected, min_frac):
+    """Stretches where the depth is below min_frac of the expected depth (bases
+    that no simulated read covers, e.g. a record shorter than the insert, are kept)."""
     regions, start = [], None
     for i, v in enumerate(arr):
-        if v < thr:
+        if v < min_frac * expected[i]:
             if start is None:
                 start = i
         elif start is not None:
@@ -111,7 +126,7 @@ def run(args):
         ref = os.path.join(tmp, "ref.fasta")
         SeqIO.write(records, ref, "fasta")
         r1, r2 = os.path.join(tmp, "r1.fq.gz"), os.path.join(tmp, "r2.fq.gz")
-        n = simulate(records, args.read_len, args.insert, args.step, r1, r2)
+        n, expected_depth = simulate(records, args.read_len, args.insert, args.step, r1, r2)
         print(f"simulated {n:,} pairs ({args.read_len} bp, insert {args.insert}, step {args.step})", flush=True)
 
         subprocess.run(["bwa-mem2", "index", ref], check=True,
@@ -123,19 +138,22 @@ def run(args):
             sys.exit("mappability: bwa-mem2 mem failed")
 
     expected = 2 * args.read_len / args.step
-    thr = args.min_frac * expected
     total_bad = 0
-    with open(args.out_bed, "w") as out:
+    # written under a temporary name and renamed: two runs sharing mappability_dir
+    # never see a half-written mask
+    tmp_bed = f"{args.out_bed}.{os.getpid()}.tmp"
+    with open(tmp_bed, "w") as out:
         out.write(f"#contig\tstart\tend\t# PE{args.read_len} insert {args.insert} MAPQ>={args.min_mapq}: "
-                  f"depth < {thr:.1f} of {expected:.0f} expected\n")
+                  f"depth < {args.min_frac} x expected ({expected:.0f} away from linear ends)\n")
         for rec in records:
-            regs = unmappable_regions(depth[rec.id], thr)
+            regs = unmappable_regions(depth[rec.id], expected_depth[rec.id], args.min_frac)
             bad = sum(e - s for s, e in regs)
             total_bad += bad
             print(f"{rec.id}: {len(regs)} unmappable region(s), {bad:,} bp "
                   f"({100 * bad / max(lengths[rec.id], 1):.2f}%)")
             for s, e in regs:
                 out.write(f"{rec.id}\t{s}\t{e}\n")
+    os.replace(tmp_bed, args.out_bed)
     print(f"total unmappable: {total_bad:,} bp -> {args.out_bed}")
 
 

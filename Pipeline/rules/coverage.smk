@@ -19,14 +19,21 @@ MAP_READ_LEN    = config.get("mappability_read_len", 75)
 MAP_INSERT      = config.get("mappability_insert", 300)
 MAP_MIN_MAPQ    = config.get("min_mapq", 20)
 
-# one mask per reference GenBank file, named after the file (+ the read settings,
-# so changing them makes a new mask; the folder can be shared between runs)
-REF_KEYS = {s: re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(ref_gb_path(s)))[0])
-            for s in SR_SAMPLES}
-REF_KEY_PATH = {}
-for _s, _k in REF_KEYS.items():
-    if REF_KEY_PATH.setdefault(_k, ref_gb_path(_s)) != ref_gb_path(_s):
-        raise WorkflowError(f"two different reference files are both named {_k}: rename one")
+# one mask per reference, named after its GenBank file + a hash of its content
+# (+ the read settings): a changed reference or changed settings make a new
+# mask, and a mask in a shared mappability_dir is reused by every run.
+import hashlib
+
+
+def _ref_key(path):
+    with open(path, "rb") as fh:
+        digest = hashlib.sha1(fh.read()).hexdigest()[:8]
+    return re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(path))[0]) + "_" + digest
+
+
+_KEY_OF_PATH = {}
+REF_KEYS = {s: _KEY_OF_PATH.setdefault(ref_gb_path(s), _ref_key(ref_gb_path(s))) for s in SR_SAMPLES}
+REF_KEY_PATH = {k: p for p, k in _KEY_OF_PATH.items()}
 
 
 def mappability_bed(sample):
@@ -42,9 +49,11 @@ if RUN_MAPPABILITY and SR_SAMPLES:
         """Simulated perfect PE reads from the reference, mapped back with bwa-mem2:
         bases they cannot cover uniquely (MAPQ < min_mapq) = unmappable."""
         input:
-            # the staged copy of one sample using it (usable contig names, as the BAMs)
-            gb = lambda wc: OUT_DIR + "{s}/{s}.ref.gb".format(
-                s=next(s for s, k in REF_KEYS.items() if k == wc.ref)),
+            # the staged copy of one sample using it (usable contig names, as the BAMs).
+            # ancient(): the copy is new in every run, but the mask name already
+            # carries the reference's content hash, so an existing mask is reused.
+            gb = lambda wc: ancient(OUT_DIR + "{s}/{s}.ref.gb".format(
+                s=next(s for s, k in REF_KEYS.items() if k == wc.ref))),
         output:
             bed = MAPPABILITY_DIR + "{ref}.pe{read_len}_ins{ins}_q{mapq}.unmappable.bed",
         wildcard_constraints:

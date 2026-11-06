@@ -27,7 +27,7 @@ COLUMNS = [
     "ref_length", "ref_records", "coverage_approx",
     "pct_mapped", "mean_depth", "min_replicon_breadth",
     "detected_mutations", "low_cov_regions", "high_cov_regions", "large_indels", "breakpoints",
-    "multimer", "multimer_copies", "multimer_pct",
+    "multimer", "multimer_copies", "multimer_pct", "multimer_replicon",
     "assembly_contigs", "assembly_circular", "cassette_insertions", "cassette_hotspots",
 ]
 
@@ -153,13 +153,30 @@ def count_rows(path):
     return n
 
 
+def _pct(r):
+    try:
+        return float(r.get("multimer_pct", 0))
+    except ValueError:
+        return 0.0
+
+
 def multimer_summary(path):
+    """Sample-level call from the per-replicon rows: 'yes' if any replicon is
+    multimeric, else 'no' if any could be judged, else 'NA'. Copies and % come
+    from the replicon behind the call (multimer_replicon)."""
     with open(path, newline="") as fh:
         rows = list(csv.DictReader(fh, delimiter="\t"))
     if not rows:
         raise ValueError("no data row")
-    r = rows[0]
-    return r.get("multimer", ERR), r.get("multimer_copies", ERR), r.get("multimer_pct", ERR)
+    for call in ("yes", "no"):
+        hits = [r for r in rows if r.get("multimer") == call]
+        if hits:
+            r = max(hits, key=_pct)
+            break
+    else:
+        r = max(rows, key=lambda r: int(r.get("reads_mapped") or 0))
+    return (r.get("multimer", ERR), r.get("multimer_copies", ERR),
+            r.get("multimer_pct", ERR), r.get("reference", ERR))
 
 
 def assembly_stats(path):
@@ -255,8 +272,8 @@ def summarize_sample(s, out_dir, tg):
             os.path.join(d, "annotated", name + ".breakpoints.annotated.tsv")))
     if tg.get("multimer") and ont:
         m = try_(name, "multimer summary", lambda: multimer_summary(
-            base + ".multimer.summary.tsv"), default=(ERR, ERR, ERR))
-        rec["multimer"], rec["multimer_copies"], rec["multimer_pct"] = m
+            base + ".multimer.summary.tsv"), default=(ERR, ERR, ERR, ERR))
+        rec["multimer"], rec["multimer_copies"], rec["multimer_pct"], rec["multimer_replicon"] = m
     if tg.get("denovo"):
         a = try_(name, "assembly_info", lambda: assembly_stats(base + ".assembly_info.txt"),
                  default=(ERR, ERR))

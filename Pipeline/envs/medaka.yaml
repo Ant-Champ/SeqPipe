@@ -1,3 +1,5 @@
 channels: [conda-forge, bioconda]
 dependencies:
-  - medaka
+  # medaka 2.x: `medaka_variant -i reads -r ref` (haploid) writing
+  # medaka.annotated.vcf with the SR field. 1.x has no such command.
+  - medaka>=2.0,<3

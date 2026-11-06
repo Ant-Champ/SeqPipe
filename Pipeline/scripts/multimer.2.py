@@ -22,8 +22,12 @@ molecule and the *topology* of its alignment blocks:
                        (t_start(i+1) - t_end(i))  ==  query_gap   (mod L)
   chimera        : strand flip, or a jump to an unrelated reference position.
 
+Every record of the reference (chromosome, plasmids...) is analysed on its
+own: a read is assigned to the record holding most of its aligned bases.
+
 Input  : PAF produced by `minimap2 -x map-ont -c --secondary=no ref.fa reads.fq`
-Output : per-read TSV (-out) + human readable summary on stdout.
+Output : per-read TSV (-out, with a replicon column), one summary row per
+         replicon (-summary), and a human readable report per replicon on stdout.
 """
 
 import argparse
@@ -44,8 +48,8 @@ def parse_args():
     p.add_argument("-out", required=True,
                    help="Output per-read classification TSV")
     p.add_argument("-summary",
-                   help="Optional one-line machine-readable TSV summary "
-                        "(header + 1 row) for downstream merging")
+                   help="Optional machine-readable TSV summary "
+                        "(header + one row per replicon) for downstream merging")
     p.add_argument("-min_frac", type=float, default=0.10,
                    help="Min fraction of full-length reads that must be "
                         "multimeric to call the sample multimeric [0.10]")
@@ -205,50 +209,9 @@ def histogram(ratios, width=50, bin_size=0.1, max_ratio=6.0):
 
 
 # ----------------------------------------------------------------------
-def main():
-    args = parse_args()
-
-    ref_lengths = read_fasta_lengths(args.ref)
-    if not ref_lengths:
-        sys.exit("ERROR: no sequence found in %s" % args.ref)
-
-    per_read = read_paf(args.paf, args.min_mapq)
-
-    # dominant reference contig (plasmids: normally a single sequence)
-    aligned_per_target = Counter()
-    for blocks in per_read.values():
-        for b in blocks:
-            aligned_per_target[b["t"]] += b["alen"]
-    if aligned_per_target:
-        target = aligned_per_target.most_common(1)[0][0]
-    else:
-        target = max(ref_lengths, key=ref_lengths.get)
-
-    if target not in ref_lengths:
-        sys.exit("ERROR: reference %s absent from %s" % (target, args.ref))
-    L = ref_lengths[target]
+def analyse(target, L, results, args):
+    """Report and verdict for one replicon; returns its summary fields."""
     tol_bp = max(50.0, args.tol * L)
-
-    results = {}
-    for qname, blocks in per_read.items():
-        blocks = [b for b in blocks if b["t"] == target]
-        if blocks:
-            results[qname] = classify(blocks, L, tol_bp, args.min_qcov, args.cut)
-
-    # ---------------- per-read TSV ------------------------------------
-    with open(args.out, "w") as fh:
-        fh.write("read\tread_len\tlen_ratio\tref_span_ratio\tn_blocks\t"
-                 "strand\tquery_cov\tseamless\tmax_junction_bp\t"
-                 "class\tcopies\n")
-        for qname in sorted(results, key=lambda k: -results[k]["len_ratio"]):
-            r = results[qname]
-            fh.write("%s\t%d\t%.2f\t%.2f\t%d\t%s\t%.3f\t%s\t%d\t%s\t%d\n"
-                     % (qname, r["qlen"], r["len_ratio"], r["span_ratio"],
-                        r["n_blocks"], r["strand"], r["q_cov"],
-                        "yes" if r["seamless"] else "no",
-                        int(r["max_junction_bp"]), r["label"], r["copies"]))
-
-    # ---------------- summary ----------------------------------------
     labels = Counter(r["label"] for r in results.values())
     n_mono = labels["monomer"]
     n_multi = labels["multimer"]
@@ -320,25 +283,73 @@ def main():
         print("WARNING: chimeric long reads outnumber seamless concatemers; "
               "suspect ligation artefacts rather than true multimers.")
     print("=" * 68)
+    print("")
 
-    # ---------------- machine readable summary -----------------------
+    return [
+        ("reference",        target),
+        ("monomer_len",      L),
+        ("reads_mapped",     len(results)),
+        ("n_monomer",        n_mono),
+        ("n_multimer",       n_multi),
+        ("n_chimera",        n_chim),
+        ("multimer_frac",    "%.4f" % frac),
+        ("multimer_pct",     "%.1f" % (frac * 100)),
+        ("multimer_copies",  dominant),
+        ("multimer",         call),
+        ("verdict",          verdict.replace("\t", " ")),
+    ]
+
+
+def main():
+    args = parse_args()
+
+    ref_lengths = read_fasta_lengths(args.ref)
+    if not ref_lengths:
+        sys.exit("ERROR: no sequence found in %s" % args.ref)
+
+    per_read = read_paf(args.paf, args.min_mapq)
+
+    # Every replicon is analysed on its own (a chromosome + plasmid reference:
+    # the plasmid gets its own verdict). A read belongs to the replicon that
+    # holds most of its aligned bases; its blocks elsewhere count as foreign
+    # sequence (they lower its query coverage).
+    results = {t: {} for t in ref_lengths}
+    for qname, blocks in per_read.items():
+        per_target = Counter()
+        for b in blocks:
+            per_target[b["t"]] += b["alen"]
+        target = max(per_target, key=lambda t: (per_target[t], t))
+        if target not in ref_lengths:
+            sys.exit("ERROR: reference %s absent from %s" % (target, args.ref))
+        L = ref_lengths[target]
+        results[target][qname] = classify([b for b in blocks if b["t"] == target],
+                                          L, max(50.0, args.tol * L),
+                                          args.min_qcov, args.cut)
+
+    # ---------------- per-read TSV ------------------------------------
+    with open(args.out, "w") as fh:
+        fh.write("read\treplicon\tread_len\tlen_ratio\tref_span_ratio\tn_blocks\t"
+                 "strand\tquery_cov\tseamless\tmax_junction_bp\t"
+                 "class\tcopies\n")
+        for target in ref_lengths:
+            res = results[target]
+            for qname in sorted(res, key=lambda k: (-res[k]["len_ratio"], k)):
+                r = res[qname]
+                fh.write("%s\t%s\t%d\t%.2f\t%.2f\t%d\t%s\t%.3f\t%s\t%d\t%s\t%d\n"
+                         % (qname, target, r["qlen"], r["len_ratio"], r["span_ratio"],
+                            r["n_blocks"], r["strand"], r["q_cov"],
+                            "yes" if r["seamless"] else "no",
+                            int(r["max_junction_bp"]), r["label"], r["copies"]))
+
+    # ---------------- report + summary, one per replicon -------------
+    rows = [analyse(t, ref_lengths[t], results[t], args) for t in ref_lengths]
+
+    # machine readable summary: one row per replicon
     if args.summary:
-        fields = [
-            ("reference",        target),
-            ("monomer_len",      L),
-            ("reads_mapped",     len(results)),
-            ("n_monomer",        n_mono),
-            ("n_multimer",       n_multi),
-            ("n_chimera",        n_chim),
-            ("multimer_frac",    "%.4f" % frac),
-            ("multimer_pct",     "%.1f" % (frac * 100)),
-            ("multimer_copies",  dominant),
-            ("multimer",         call),
-            ("verdict",          verdict.replace("\t", " ")),
-        ]
         with open(args.summary, "w") as fh:
-            fh.write("\t".join(k for k, _ in fields) + "\n")
-            fh.write("\t".join(str(v) for _, v in fields) + "\n")
+            fh.write("\t".join(k for k, _ in rows[0]) + "\n")
+            for fields in rows:
+                fh.write("\t".join(str(v) for _, v in fields) + "\n")
 
 
 if __name__ == "__main__":

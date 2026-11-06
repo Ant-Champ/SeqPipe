@@ -411,7 +411,7 @@ Rule (step) names for `--forcerun` / `--until`:
   summary.tsv                         <- one row per sample
   coverage_summary.tsv                <- every sample x replicon (reference + plasmid panel): breadth, depth
   depth_check.tsv                     <- theoretical depth of every sample, ok / low_diversity
-  mappability/<ref>.pe75_ins300_q20.unmappable.bed   short reads: repeats ignored by the low-coverage scan
+  mappability/<ref>_<hash>.pe75_ins300_q20.unmappable.bed   short reads: repeats ignored by the low-coverage scan
   <sample>/
     <sample>.sorted.bam(.bai)         alignment to the sample's reference (open in a genome browser with <sample>.ref.fasta)
     <sample>.flagstat.txt             % mapped (wrong reference or contamination if low)
@@ -420,13 +420,13 @@ Rule (step) names for `--forcerun` / `--until`:
     qc/<sample>.fastp.html            short reads: trimming report
     qc/<sample>.depth_check.tsv       theoretical depth (a low_diversity sample stops here)
     <sample>.simple.tsv               SNPs / small indels
-    <sample>.annotated.gatc.simple.tsv  ... + NearGATC + gene annotation (+ multimer column, ONT)
+    <sample>.annotated.gatc.simple.tsv  ... + NearGATC + gene annotation (+ multimer column of the variant's replicon, ONT)
     coverage/<sample>.coverage_summary.tsv   per replicon: mean/median depth, % zero, % low, % masked
     annotated/<sample>.low_coverage.annotated.tsv    deletions (with the genes hit)
     annotated/<sample>.high_coverage.annotated.tsv   duplications / amplifications (fold vs replicon median)
     annotated/<sample>.indels.annotated.tsv
     annotated/<sample>.breakpoints.annotated.tsv
-    <sample>.multimer.summary.tsv     ONT: multimer verdict
+    <sample>.multimer.summary.tsv     ONT: multimer verdict, one row per replicon
     <sample>.assembly.fasta / .assembly_info.txt / .assembly_graph.gfa
     <sample>.plasmid_panel.sorted.bam, <sample>.plasmid_coverage.tsv
     annotated/<sample>.cassette_insertions.annotated.tsv   insertion sites (+ replaced genes)
@@ -503,7 +503,8 @@ Clicking a variant / indel / breakpoint mark on a plot, or a row of a table, sho
 For references up to 200 kb (plasmids, phages, PCR products) the reads cover the whole
 reference; for larger genomes they are kept ± 500 bp around every variant, indel, breakpoint,
 coverage edge and cassette site (elsewhere the plot says "no reads stored here"). Only what
-differs from the reference is stored, so this adds ~0.1–0.5 MB per sample to `report.html`.
+differs from the reference is stored, so this adds ~0.1–0.5 MB per sample to `report.html` (up to
+~2 MB for a 200 kb reference sequenced deeply with short reads; `report_reads_max_rows` lowers it).
 
 The hotspot pictures appear when `run_hotspot_pictures` is on. They are embedded in the file;
 set `report_embed_pictures: false` to link to the PNG files instead and keep `report.html` small. The
@@ -527,7 +528,7 @@ there but could not be read, and the reason is in `logs/run_summary.log`.
 | `min_replicon_breadth` | lowest % of a replicon covered. **A lost plasmid shows here as ~0** |
 | `detected_mutations` | rows in `simple.tsv` |
 | `low_cov_regions`, `high_cov_regions`, `large_indels`, `breakpoints` | rows in the annotated tables |
-| `multimer`, `multimer_copies`, `multimer_pct` | ONT multimer call |
+| `multimer`, `multimer_copies`, `multimer_pct`, `multimer_replicon` | ONT multimer call. Each replicon (chromosome, plasmids) is judged on its own; `multimer` is `yes` if any replicon is multimeric, else `no` if one could be judged, else `NA` (no full-length read: a chromosome always is). Copies and % are those of `multimer_replicon`. Every replicon's verdict is in `<sample>.multimer.summary.tsv` |
 | `assembly_contigs`, `assembly_circular` | number of contigs / circular contigs (`skipped` if too little data) |
 | `cassette_insertions` | `cassette@contig:start-end[replaced genes]` per site, `;`-separated, `none` if no site. One-sided sites read `cassette@contig:pos(left_only)` |
 | `cassette_hotspots` | same format, one entry per hotspot (see the cassette tables) |
@@ -565,8 +566,9 @@ How to read them:
   PE reads (`mappability_read_len`, `mappability_insert`) are simulated from each reference,
   mapped back with bwa-mem2, and the bases they cannot cover at MAPQ ≥ `min_mapq` are ignored by
   the low-coverage scan (and left out of the median). The mask is
-  `<out_dir>/mappability/<reference>.pe75_ins300_q20.unmappable.bed` (once per reference; set
-  `mappability_dir` to a shared folder to reuse it between runs). `masked_bp` in the table says how
+  `<out_dir>/mappability/<reference>_<hash>.pe75_ins300_q20.unmappable.bed`, made once per reference
+  (`<hash>` comes from the GenBank file's content, so an edited reference gets a new mask). Set
+  `mappability_dir` to a shared folder and every run reuses the masks already there. `masked_bp` in the table says how
   much of a region is masked; `pct_masked` is in `coverage/<sample>.coverage_summary.tsv`.
 - **A duplication** shows as a `high_coverage` region with `fold` ≈ 2 (≈ 3 for two extra
   copies), often with breakpoints at its ends. The threshold is relative to the median of the

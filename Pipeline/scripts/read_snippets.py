@@ -10,7 +10,8 @@ edges, cassette hotspots / sites), merged, at most --max-windows of them.
 Which reads: primary alignments (no secondary / supplementary), sorted by
 start and packed into at most --max-rows rows (a read that finds no free row
 is dropped: like a browser's downsampling, every position keeps up to
---max-rows reads), at most --max-reads per contig.
+--max-rows reads). The rows bound the output; --max-reads (default 0 = off)
+is an extra cap per contig.
 
 What is kept of a read: start, end (1-based, inclusive), flags (1 = reverse
 strand, 2 = MAPQ < --min-mapq), soft clips on each side, and only what differs
@@ -127,42 +128,45 @@ def run(args):
     out = {}
     for c, ws in wins.items():
         ref = fa.fetch(c).upper()
-        seen, reads = set(), []
+        # Reads are streamed in start order (windows are sorted and do not
+        # overlap) and packed as they come: nothing per contig is held in memory
+        # but the rows' ends and the reads kept.
+        row_end, packed, n_seen, prev_end, full = [], [], 0, 0, False
         for s, e in ws:
             for r in bam.fetch(c, s, e):
                 if r.flag & 0x904 or not r.cigartuples:
                     continue
-                key = (r.query_name, r.reference_start, r.is_read1)
-                if key in seen:
+                if r.reference_start < prev_end:     # already seen in the previous window
                     continue
-                seen.add(key)
-                reads.append(r)
-        reads.sort(key=lambda r: r.reference_start)
-        row_end, packed = [], []
-        for r in reads:
-            ct = r.cigartuples
-            lclip = ct[0][1] if ct[0][0] == 4 else 0
-            rclip = ct[-1][1] if ct[-1][0] == 4 else 0
-            s0 = r.reference_start - lclip               # room for the clipped tails
-            for i, e0 in enumerate(row_end):
-                if s0 > e0 + 1:
-                    row = i
+                n_seen += 1
+                ct = r.cigartuples
+                lclip = ct[0][1] if ct[0][0] == 4 else 0
+                rclip = ct[-1][1] if ct[-1][0] == 4 else 0
+                s0 = r.reference_start - lclip               # room for the clipped tails
+                for i, e0 in enumerate(row_end):
+                    if s0 > e0 + 1:
+                        row = i
+                        break
+                else:
+                    if len(row_end) >= args.max_rows:
+                        continue
+                    row_end.append(0)
+                    row = len(row_end) - 1
+                row_end[row] = r.reference_end + rclip
+                flags = (1 if r.is_reverse else 0) | (2 if r.mapping_quality < args.min_mapq else 0)
+                packed.append([row, r.reference_start + 1, r.reference_end, flags, lclip, rclip]
+                              + read_ops(r, ref, args.min_bq))
+                if args.max_reads and len(packed) >= args.max_reads:
+                    print(f"WARNING: {c}: --max-reads {args.max_reads} reached at {r.reference_end:,}: "
+                          "no reads stored after it", file=sys.stderr)
+                    full = True
                     break
-            else:
-                if len(row_end) >= args.max_rows:
-                    continue
-                row_end.append(0)
-                row = len(row_end) - 1
-            row_end[row] = r.reference_end + rclip
-            flags = (1 if r.is_reverse else 0) | (2 if r.mapping_quality < args.min_mapq else 0)
-            packed.append([row, r.reference_start + 1, r.reference_end, flags, lclip, rclip]
-                          + read_ops(r, ref, args.min_bq))
-            if len(packed) >= args.max_reads:
-                print(f"WARNING: {c}: --max-reads {args.max_reads} reached", file=sys.stderr)
+            prev_end = e
+            if full:
                 break
         out[c] = {"windows": [[s + 1, e] for s, e in ws], "rows": len(row_end),
                   "ref": [[s + 1, ref[s:e]] for s, e in ws], "reads": packed}
-        print(f"{c}: {len(reads)} read(s) in the windows, {len(packed)} kept in {len(row_end)} row(s)")
+        print(f"{c}: {n_seen} read(s) in the windows, {len(packed)} kept in {len(row_end)} row(s)")
     with open(args.out, "w") as fh:
         json.dump(out, fh, separators=(",", ":"))
     print(f"-> {args.out}")
@@ -178,7 +182,8 @@ def main():
     ap.add_argument("--flank", type=int, default=500)
     ap.add_argument("--max-windows", type=int, default=300)
     ap.add_argument("--max-rows", type=int, default=40)
-    ap.add_argument("--max-reads", type=int, default=20000)
+    ap.add_argument("--max-reads", type=int, default=0,
+                    help="stop after this many reads per contig (0 = no limit: --max-rows bounds the output)")
     ap.add_argument("--min-mapq", type=int, default=20)
     ap.add_argument("--min-bq", type=int, default=0, help="mismatches below this base quality are not kept")
     run(ap.parse_args())
